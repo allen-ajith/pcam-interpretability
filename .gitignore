@@ -1,0 +1,23 @@
+# Python cache
+__pycache__/
+*.pyc
+
+# Jupyter notebook checkpoints
+.ipynb_checkpoints/
+
+# Environment files
+.env
+
+# Machine learning models
+*.h5
+*.pth
+*.pt
+
+# System files
+.DS_Store
+
+# PDF files
+*.pdf
+
+# Data folder
+data/
