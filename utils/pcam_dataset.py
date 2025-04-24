@@ -1,9 +1,10 @@
-# pcam_dataset.py
-
 import h5py
 import torch
 from torch.utils.data import Dataset
 from huggingface_hub import hf_hub_download
+from PIL import Image
+
+
 
 class PCamHFDataset(Dataset):
     def __init__(self, repo_id: str, split: str = "train", transform=None):
@@ -15,13 +16,24 @@ class PCamHFDataset(Dataset):
             split (str): One of 'train', 'val', or 'test'
             transform (callable, optional): Optional transform to apply on the image
         """
-        self.transform = transform
+        if self.transform:
+            image = Image.fromarray(image.astype('uint8'))  # Convert NumPy array to PIL Image
+            image = self.transform(image)
+        else:
+            # Default transform: normalize and permute
+            image = torch.tensor(image, dtype=torch.float32).permute(2, 0, 1) / 255.0
+
+
         self.split = split
         self.repo_id = repo_id
 
-        # Correct filenames with the subfolder 'pcam/'
-        x_file = f"pcam/camelyonpatch_level_2_split_{split}_x.h5"
-        y_file = f"pcam/camelyonpatch_level_2_split_{split}_y.h5"
+        # Map 'val' → 'valid' for the filename
+        split_map = {'train': 'train', 'val': 'valid', 'test': 'test'}
+        split_key = split_map[split]
+
+        x_file = f"pcam/camelyonpatch_level_2_split_{split_key}_x.h5"
+        y_file = f"pcam/camelyonpatch_level_2_split_{split_key}_y.h5"
+
 
         # FIX: Added repo_type="dataset" here:
         self.x_path = hf_hub_download(repo_id=repo_id, filename=x_file, repo_type="dataset")
