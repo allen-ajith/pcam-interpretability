@@ -20,8 +20,8 @@ class PCamHFDataset(Dataset):
         self.repo_id = repo_id
 
         # Get paths to x and y .h5 files from Hugging Face Hub
-        x_file = f"camelyonpatch_level_2_split_{split}_x.h5"
-        y_file = f"camelyonpatch_level_2_split_{split}_y.h5"
+        x_file = f"pcam/camelyonpatch_level_2_split_{split}_x.h5"
+        y_file = f"pcam/camelyonpatch_level_2_split_{split}_y.h5"
 
         self.x_path = hf_hub_download(repo_id=repo_id, filename=x_file)
         self.y_path = hf_hub_download(repo_id=repo_id, filename=y_file)
