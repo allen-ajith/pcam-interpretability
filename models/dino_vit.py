@@ -4,12 +4,12 @@ from transformers import AutoModelForImageClassification, AutoImageProcessor
 
 class DinoVitBinary(nn.Module):
     """
-    DINO ViT-B/16 model for binary classification.
+    DINO ViT-S/16 model for binary classification.
     Replaces the final classifier head with a single output neuron.
     """
     def __init__(self, pretrained=True):
         super(DinoVitBinary, self).__init__()
-        model_name = "facebook/dino-vitb16"
+        model_name = "facebook/dino-vits16"  
         
         if pretrained:
             self.backbone = AutoModelForImageClassification.from_pretrained(model_name)
@@ -31,7 +31,7 @@ class DinoVitBinary(nn.Module):
 
 def create_dino_vit(pretrained=True):
     """
-    Creates a DINO ViT-B/16 model for binary classification.
+    Creates a DINO ViT-S/16 model for binary classification.
 
     Args:
         pretrained (bool): Whether to use self-supervised pretrained weights.

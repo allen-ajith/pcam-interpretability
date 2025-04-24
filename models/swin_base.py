@@ -1,15 +1,15 @@
 import torch
 import torch.nn as nn
-from transformers import SwinForImageClassification, AutoImageProcessor
+from transformers import SwinForImageClassification
 
-class SwinBaseBinary(nn.Module):
+class SwinTinyBinary(nn.Module):
     """
-    Swin Transformer Base model for binary classification.
+    Swin Transformer Tiny model for binary classification.
     Replaces the final classifier head with a single output neuron.
     """
     def __init__(self, pretrained=True):
-        super(SwinBaseBinary, self).__init__()
-        model_name = "microsoft/swin-base-patch4-window7-224"
+        super(SwinTinyBinary, self).__init__()
+        model_name = "microsoft/swin-tiny-patch4-window7-224"  
         
         if pretrained:
             self.backbone = SwinForImageClassification.from_pretrained(model_name)
@@ -18,7 +18,7 @@ class SwinBaseBinary(nn.Module):
 
         # Replace the classifier head for binary output (1 output neuron)
         in_features = self.backbone.classifier.in_features
-        self.backbone.classifier = nn.Linear(in_features, 1)  # Raw logits (no sigmoid here)
+        self.backbone.classifier = nn.Linear(in_features, 1)  # Raw logits (no sigmoid)
 
     def forward(self, x):
         """
@@ -29,13 +29,13 @@ class SwinBaseBinary(nn.Module):
         """
         return self.backbone(x).logits
 
-def create_swin_base(pretrained=True):
+def create_swin_tiny(pretrained=True):
     """
-    Creates a Swin-Base model for binary classification.
+    Creates a Swin-Tiny model for binary classification.
     
     Args:
         pretrained (bool): Whether to use ImageNet pretrained weights.
     Returns:
-        nn.Module: Swin-Base binary classifier model.
+        nn.Module: Swin-Tiny binary classifier model.
     """
-    return SwinBaseBinary(pretrained=pretrained)
+    return SwinTinyBinary(pretrained=pretrained)
