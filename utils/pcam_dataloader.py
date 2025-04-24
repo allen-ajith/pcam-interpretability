@@ -1,7 +1,7 @@
 import torch
 from torch.utils.data import DataLoader
 from torchvision import transforms
-from utils.pcam_dataset import PCamHFDataset  # your new dataset class
+from utils.pcam_dataset import PCamHFDataset  
 
 # ImageNet normalization
 imagenet_mean = [0.485, 0.456, 0.406]

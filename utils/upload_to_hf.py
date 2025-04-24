@@ -1,4 +1,4 @@
-from huggingface_hub import create_repo, upload_file, upload_folder
+from huggingface_hub import HfApi, upload_file
 import os
 
 def write_readme(model_name, val_acc, epochs=None, batch_size=None, learning_rate=None, save_dir="tmp_hf_upload"):
@@ -44,40 +44,44 @@ def upload_model_to_hf(model_name, val_acc, checkpoint_dir="checkpoints",
     if not os.path.exists(weights_path):
         raise FileNotFoundError(f"Checkpoint not found at {weights_path}")
 
-    # Create repo if it doesn't exist
-    create_repo(repo_name, exist_ok=True)
+    api = HfApi()
+    try:
+        api.create_repo(
+            name=repo_name,
+            repo_type="model",
+            exist_ok=True,
+            lfs=True  
+        )
+        print(f"Repo '{repo_name}' created or already exists.")
+    except Exception as e:
+        print(f"Repo creation error: {e}")
 
     # Prepare README.md
     temp_dir = "tmp_hf_upload"
     readme_path = write_readme(model_name, val_acc, epochs, batch_size, learning_rate, save_dir=temp_dir)
 
     # Upload model weights
-    upload_file(
-        path_or_fileobj=weights_path,
-        path_in_repo=os.path.basename(weights_path),
-        repo_id=repo_name,
-        commit_message=commit_message
-    )
-    print(f"Uploaded model weights to: https://huggingface.co/{repo_name}")
+    try:
+        upload_file(
+            path_or_fileobj=weights_path,
+            path_in_repo=os.path.basename(weights_path),
+            repo_id=repo_name,
+            commit_message=commit_message,
+            repo_type="model"
+        )
+        print(f"Uploaded model weights to: https://huggingface.co/{repo_name}")
+    except Exception as e:
+        print(f"Error uploading model weights: {e}")
 
     # Upload README.md
-    upload_file(
-        path_or_fileobj=readme_path,
-        path_in_repo="README.md",
-        repo_id=repo_name,
-        commit_message="Add training summary"
-    )
-    print(f"Uploaded README.md to: https://huggingface.co/{repo_name}")
-
-# if __name__ == "__main__":
-#     # Example usage
-#     model_name = "resnet50"
-#     val_acc = 0.9367  
-
-#     upload_model_to_hf(
-#         model_name=model_name,
-#         val_acc=val_acc,
-#         epochs=20,
-#         batch_size=64,
-#         learning_rate=1e-4
-#     )
+    try:
+        upload_file(
+            path_or_fileobj=readme_path,
+            path_in_repo="README.md",
+            repo_id=repo_name,
+            commit_message="Add training summary",
+            repo_type="model"
+        )
+        print(f"Uploaded README.md to: https://huggingface.co/{repo_name}")
+    except Exception as e:
+        print(f"Error uploading README.md: {e}")

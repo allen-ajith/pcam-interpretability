@@ -19,14 +19,14 @@ class PCamHFDataset(Dataset):
         self.split = split
         self.transform = transform
 
-        # Map 'val' → 'valid' for filename consistency
+        # Map 'val' → 'valid' for compatibility with Hugging Face dataset
         split_map = {'train': 'train', 'val': 'valid', 'test': 'test'}
         split_key = split_map[self.split]
 
         x_file = f"pcam/camelyonpatch_level_2_split_{split_key}_x.h5"
         y_file = f"pcam/camelyonpatch_level_2_split_{split_key}_y.h5"
 
-        # Download .h5 files from HF Hub with correct repo_type
+        # Download .h5 files from HF Hub 
         self.x_path = hf_hub_download(repo_id=self.repo_id, filename=x_file, repo_type="dataset")
         self.y_path = hf_hub_download(repo_id=self.repo_id, filename=y_file, repo_type="dataset")
 
