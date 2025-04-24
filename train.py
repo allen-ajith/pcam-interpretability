@@ -107,7 +107,7 @@ def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimiz
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PCam Training Script with HF Upload")
-    parser.add_argument('--model_name', type=str, required=True, choices=["resnet50", "swin-tiny", "dino-vitb16"])
+    parser.add_argument('--model_name', type=str, required=True, choices=["resnet50", "swin-tiny", "dino-vits16"])
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--lr', type=float, default=1e-4)
@@ -122,9 +122,9 @@ if __name__ == "__main__":
 
     if args.model_name == "resnet50":
         model = create_resnet50(pretrained=True)
-    elif args.model_name == "swin-base":
+    elif args.model_name == "swin-tiny":
         model = create_swin_tiny(pretrained=True)
-    elif args.model_name == "dino-vitb16":
+    elif args.model_name == "dino-vits16":
         model = create_dino_vit(pretrained=True)
 
     best_val_acc = train_model(

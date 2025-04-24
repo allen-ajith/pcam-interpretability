@@ -12,7 +12,7 @@ def save_dummy_model_weights(model, model_name, checkpoint_dir="checkpoints"):
     print(f" Saved pretrained weights (no training) for {model_name} at {save_path}")
     return save_path
 
-def test_upload(model_name, val_acc=0.9123, epochs=0, batch_size=64, lr=1e-4):
+def test_upload(model_name, val_acc=0.69420, epochs=0, batch_size=64, lr=1e-4):
     checkpoint_dir = "checkpoints"
     
     # Load pretrained models
@@ -20,7 +20,7 @@ def test_upload(model_name, val_acc=0.9123, epochs=0, batch_size=64, lr=1e-4):
         model = create_resnet50(pretrained=True)
     elif model_name == "swin-tiny":
         model = create_swin_tiny(pretrained=True)
-    elif model_name == "dino-vitb16":
+    elif model_name == "dino-vits16":
         model = create_dino_vit(pretrained=True)
     else:
         raise ValueError(f"Unsupported model: {model_name}")
@@ -41,6 +41,6 @@ def test_upload(model_name, val_acc=0.9123, epochs=0, batch_size=64, lr=1e-4):
 
 if __name__ == "__main__":
     # Test all three models
-    for model in ["resnet50", "swin-tiny", "dino-vitb16"]:
+    for model in ["resnet50", "swin-tiny", "dino-vits16"]:
         print(f"\n=== Testing upload for: {model} ===")
         test_upload(model_name=model)
