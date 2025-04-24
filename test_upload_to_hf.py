@@ -41,6 +41,6 @@ def test_upload(model_name, val_acc=0.9123, epochs=0, batch_size=64, lr=1e-4):
 
 if __name__ == "__main__":
     # Test all three models
-    for model in ["resnet50", "swin-base", "dino-vitb16"]:
+    for model in ["resnet50", "swin-tiny", "dino-vitb16"]:
         print(f"\n=== Testing upload for: {model} ===")
         test_upload(model_name=model)

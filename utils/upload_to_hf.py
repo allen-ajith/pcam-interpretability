@@ -36,7 +36,6 @@ def upload_model_to_hf(model_name, val_acc, checkpoint_dir="checkpoints",
             repo_id=repo_name,
             repo_type="model",
             exist_ok=True,
-            lfs=True
         )
         print(f"Repo '{repo_name}' created or already exists.")
     except Exception as e:
