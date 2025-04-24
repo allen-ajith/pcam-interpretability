@@ -19,14 +19,15 @@ class PCamHFDataset(Dataset):
         self.split = split
         self.repo_id = repo_id
 
-        # Get paths to x and y .h5 files from Hugging Face Hub
+        # Correct filenames with the subfolder 'pcam/'
         x_file = f"pcam/camelyonpatch_level_2_split_{split}_x.h5"
         y_file = f"pcam/camelyonpatch_level_2_split_{split}_y.h5"
 
-        self.x_path = hf_hub_download(repo_id=repo_id, filename=x_file)
-        self.y_path = hf_hub_download(repo_id=repo_id, filename=y_file)
+        # FIX: Added repo_type="dataset" here:
+        self.x_path = hf_hub_download(repo_id=repo_id, filename=x_file, repo_type="dataset")
+        self.y_path = hf_hub_download(repo_id=repo_id, filename=y_file, repo_type="dataset")
 
-        # Load HDF5 datasets
+        # Open HDF5 datasets
         self.x_data = h5py.File(self.x_path, "r")["x"]
         self.y_data = h5py.File(self.y_path, "r")["y"]
 
@@ -35,12 +36,12 @@ class PCamHFDataset(Dataset):
 
     def __getitem__(self, idx):
         image = self.x_data[idx]  # shape: (96, 96, 3)
-        label = int(self.y_data[idx][0])  # label is stored as array([0]) or array([1])
+        label = int(self.y_data[idx][0])  # stored as array([0]) or array([1])
 
         if self.transform:
             image = self.transform(image)
         else:
-            # Default transform: normalize to [0, 1] and permute to CHW
+            # Default: Normalize [0, 255] → [0, 1], permute HWC → CHW
             image = torch.tensor(image, dtype=torch.float32).permute(2, 0, 1) / 255.0
 
         return image, torch.tensor(label, dtype=torch.long)

@@ -23,7 +23,7 @@ transform_val_test = transforms.Compose([
     transforms.Normalize(mean=imagenet_mean, std=imagenet_std)
 ])
 
-def get_pcam_loaders(repo_id="datasets/allen-ajith/pcam-h5", batch_size=64, num_workers=4):
+def get_pcam_loaders(repo_id="allen-ajith/pcam-h5", batch_size=64, num_workers=4, repo_type="dataset"):
     """
     Creates DataLoaders for the PCam dataset (.h5 version hosted on Hugging Face).
 
