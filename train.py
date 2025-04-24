@@ -115,7 +115,10 @@ if __name__ == "__main__":
     parser.add_argument('--scheduler', type=str, default='cosine', choices=["cosine", "step", "none"])
     args = parser.parse_args()
 
-    train_loader, val_loader, test_loader = get_pcam_loaders(root_dir='./data/pcam', batch_size=args.batch_size)
+    train_loader, val_loader, test_loader = get_pcam_loaders(batch_size=args.batch_size)
+    print(f"Train set size: {len(train_loader.dataset)}")
+    print(f"Validation set size: {len(val_loader.dataset)}")
+    print(f"Test set size: {len(test_loader.dataset)}")
 
     if args.model_name == "resnet50":
         model = create_resnet50(pretrained=True)
