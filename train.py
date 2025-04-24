@@ -7,7 +7,7 @@ import argparse
 
 from utils.pcam_dataloader import get_pcam_loaders
 from models.resnet50 import create_resnet50
-from models.swin_base import create_swin_base
+from models.swin_tiny import create_swin_tiny
 from models.dino_vit import create_dino_vit
 from utils.upload_to_hf import upload_model_to_hf
 
@@ -107,7 +107,7 @@ def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimiz
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PCam Training Script with HF Upload")
-    parser.add_argument('--model_name', type=str, required=True, choices=["resnet50", "swin-base", "dino-vitb16"])
+    parser.add_argument('--model_name', type=str, required=True, choices=["resnet50", "swin-tiny", "dino-vitb16"])
     parser.add_argument('--epochs', type=int, default=20)
     parser.add_argument('--batch_size', type=int, default=64)
     parser.add_argument('--lr', type=float, default=1e-4)
@@ -123,7 +123,7 @@ if __name__ == "__main__":
     if args.model_name == "resnet50":
         model = create_resnet50(pretrained=True)
     elif args.model_name == "swin-base":
-        model = create_swin_base(pretrained=True)
+        model = create_swin_tiny(pretrained=True)
     elif args.model_name == "dino-vitb16":
         model = create_dino_vit(pretrained=True)
 
