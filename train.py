@@ -11,7 +11,6 @@ from models.swin_tiny import create_swin_tiny
 from models.dino_vit import create_dino_vit
 from utils.upload_to_hf import upload_model_to_hf
 
-
 def train_one_epoch(model, loader, criterion, optimizer, device):
     model.train()
     running_loss, correct, total = 0.0, 0, 0
@@ -52,13 +51,13 @@ def validate(model, loader, criterion, device):
     epoch_acc = correct / total
     return epoch_loss, epoch_acc
 
-def get_optimizer(model, optimizer_name, lr):
+def get_optimizer(model, optimizer_name, lr, weight_decay):
     if optimizer_name == "adam":
-        return torch.optim.Adam(model.parameters(), lr=lr)
+        return torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
     elif optimizer_name == "adamw":
-        return torch.optim.AdamW(model.parameters(), lr=lr)
+        return torch.optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
     elif optimizer_name == "sgd":
-        return torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9)
+        return torch.optim.SGD(model.parameters(), lr=lr, momentum=0.9, weight_decay=weight_decay)
     else:
         raise ValueError(f"Unsupported optimizer: {optimizer_name}")
 
@@ -72,13 +71,14 @@ def get_scheduler(optimizer, scheduler_name, epochs):
     else:
         raise ValueError(f"Unsupported scheduler: {scheduler_name}")
 
-def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimizer_name, scheduler_name, patience=5):
+def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimizer_name, scheduler_name, weight_decay, warmup_epochs, patience=5):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
-    optimizer = get_optimizer(model, optimizer_name, lr)
+    optimizer = get_optimizer(model, optimizer_name, lr, weight_decay)
     scheduler = get_scheduler(optimizer, scheduler_name, epochs)
-    criterion = nn.BCEWithLogitsLoss()
+    criterion = nn.BCEWithLogitsLoss(label_smoothing=0.05)
+
 
     save_dir = os.path.join("checkpoints", model_name)
     os.makedirs(save_dir, exist_ok=True)
@@ -89,13 +89,20 @@ def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimiz
 
     for epoch in range(epochs):
         print(f"\nEpoch {epoch + 1}/{epochs}")
+        
+        if warmup_epochs > 0 and epoch < warmup_epochs:
+            warmup_lr = lr * (epoch + 1) / warmup_epochs
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = warmup_lr
+            print(f"Warmup LR: {warmup_lr:.6f}")
+
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_acc = validate(model, val_loader, criterion, device)
 
         print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
         print(f"Val   Loss: {val_loss:.4f}, Val   Acc: {val_acc:.4f}")
 
-        if scheduler:
+        if scheduler and epoch >= warmup_epochs:
             scheduler.step()
 
         if val_acc > best_val_acc:
@@ -123,6 +130,8 @@ if __name__ == "__main__":
     parser.add_argument('--optimizer', type=str, default='adamw', choices=["adam", "adamw", "sgd"])
     parser.add_argument('--scheduler', type=str, default='cosine', choices=["cosine", "step", "none"])
     parser.add_argument('--patience', type=int, default=5, help="Early stopping patience")
+    parser.add_argument('--weight_decay', type=float, default=0.0, help="Weight decay for optimizer")
+    parser.add_argument('--warmup_epochs', type=int, default=0, help="Number of warmup epochs before LR scheduler")
     args = parser.parse_args()
 
     train_loader, val_loader, test_loader = get_pcam_loaders(batch_size=args.batch_size)
@@ -146,6 +155,8 @@ if __name__ == "__main__":
         lr=args.lr,
         optimizer_name=args.optimizer,
         scheduler_name=args.scheduler,
+        weight_decay=args.weight_decay,
+        warmup_epochs=args.warmup_epochs,
         patience=args.patience
     )
 
