@@ -35,10 +35,11 @@ def get_pcam_loaders(
     if model_type not in ["resnet", "vit"]:
         raise ValueError(f"Invalid model_type '{model_type}'. Choose 'resnet' or 'vit'.")
 
-    # Set reproducibility if seed is provided
+    # Set global reproducibility if seed is provided
     generator = torch.Generator()
     if seed is not None:
-        print(f"Using seed {seed} for DataLoader reproducibility.")
+        print(f"Using seed {seed} for reproducibility.")
+        torch.manual_seed(seed)
         generator.manual_seed(seed)
 
     # Model-aware augmentations
