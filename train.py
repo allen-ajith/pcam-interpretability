@@ -11,7 +11,6 @@ from models.swin_tiny import create_swin_tiny
 from models.dino_vit import create_dino_vit
 from utils.upload_to_hf import upload_model_to_hf
 
-# --- Set global seed ---
 def set_seed(seed=42):
     torch.manual_seed(seed)
     if torch.cuda.is_available():
@@ -21,8 +20,8 @@ def set_seed(seed=42):
 def train_one_epoch(model, loader, criterion, optimizer, device):
     model.train()
     running_loss, correct, total = 0.0, 0, 0
-
-    for images, labels in tqdm(loader, desc="Training", leave=False):
+    pbar = tqdm(loader, desc="Training", leave=True)
+    for images, labels in pbar:
         images, labels = images.to(device), labels.float().unsqueeze(1).to(device)
         optimizer.zero_grad()
         outputs = model(images)
@@ -42,9 +41,9 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
 def validate(model, loader, criterion, device):
     model.eval()
     running_loss, correct, total = 0.0, 0, 0
-
+    pbar = tqdm(loader, desc="Validation", leave=True)
     with torch.no_grad():
-        for images, labels in tqdm(loader, desc="Validation", leave=False):
+        for images, labels in pbar:
             images, labels = images.to(device), labels.float().unsqueeze(1).to(device)
             outputs = model(images)
             loss = criterion(outputs, labels)
@@ -84,7 +83,7 @@ def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimiz
 
     optimizer = get_optimizer(model, optimizer_name, lr, weight_decay)
     scheduler = get_scheduler(optimizer, scheduler_name, epochs)
-    criterion = nn.BCEWithLogitsLoss()  # No label smoothing here
+    criterion = nn.BCEWithLogitsLoss()
 
     save_dir = os.path.join("checkpoints", model_name)
     os.makedirs(save_dir, exist_ok=True)
@@ -147,7 +146,7 @@ if __name__ == "__main__":
 
     set_seed(42)
 
-    # Choose model and determine augmentation type
+    # Model selection
     if args.model_name == "resnet50":
         model = create_resnet50(pretrained=True)
         model_type = "resnet"
