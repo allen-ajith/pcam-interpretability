@@ -11,6 +11,13 @@ from models.swin_tiny import create_swin_tiny
 from models.dino_vit import create_dino_vit
 from utils.upload_to_hf import upload_model_to_hf
 
+# --- Set global seed ---
+def set_seed(seed=42):
+    torch.manual_seed(seed)
+    if torch.cuda.is_available():
+        torch.cuda.manual_seed_all(seed)
+    print(f"Seed set to {seed} for reproducibility.")
+
 def train_one_epoch(model, loader, criterion, optimizer, device):
     model.train()
     running_loss, correct, total = 0.0, 0, 0
@@ -95,6 +102,9 @@ def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimiz
             for param_group in optimizer.param_groups:
                 param_group['lr'] = warmup_lr
             print(f"Warmup LR: {warmup_lr:.6f}")
+        else:
+            current_lr = optimizer.param_groups[0]['lr']
+            print(f"Current LR: {current_lr:.6f}")
 
         train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
         val_loss, val_acc = validate(model, val_loader, criterion, device)
@@ -104,6 +114,7 @@ def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimiz
 
         if scheduler and epoch >= warmup_epochs:
             scheduler.step()
+            print(f"LR after scheduler step: {optimizer.param_groups[0]['lr']:.6f}")
 
         if val_acc > best_val_acc:
             best_val_acc = val_acc
@@ -135,6 +146,8 @@ if __name__ == "__main__":
     parser.add_argument('--label_smoothing', type=float, default=0.05, help="Label smoothing factor")
     args = parser.parse_args()
 
+    set_seed(42)
+
     # Choose model and determine augmentation type
     if args.model_name == "resnet50":
         model = create_resnet50(pretrained=True)
@@ -148,7 +161,8 @@ if __name__ == "__main__":
         
     train_loader, val_loader, test_loader = get_pcam_loaders(
         batch_size=args.batch_size,
-        model_type=model_type
+        model_type=model_type,
+        seed=42  
     )
 
     print(f"Train set size: {len(train_loader.dataset)}")
