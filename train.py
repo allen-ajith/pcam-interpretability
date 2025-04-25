@@ -109,10 +109,10 @@ def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimiz
 
         if epochs_no_improve >= patience:
             print(f"Early stopping triggered after {epoch + 1} epochs. Best Val Acc: {best_val_acc:.4f}")
-            break
+            return best_val_acc, (epoch + 1)
 
     print("Training complete.")
-    return best_val_acc
+    return best_val_acc, epochs
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="PCam Training Script with HF Upload")
@@ -137,7 +137,7 @@ if __name__ == "__main__":
     elif args.model_name == "dino-vits16":
         model = create_dino_vit(pretrained=True)
 
-    best_val_acc = train_model(
+    best_val_acc, actual_epochs = train_model(
         model=model,
         train_loader=train_loader,
         val_loader=val_loader,
@@ -153,7 +153,7 @@ if __name__ == "__main__":
         model_name=args.model_name,
         val_acc=best_val_acc,
         checkpoint_dir="checkpoints",
-        epochs=args.epochs,
+        epochs=actual_epochs,
         batch_size=args.batch_size,
         learning_rate=args.lr
     )
