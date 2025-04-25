@@ -71,14 +71,13 @@ def get_scheduler(optimizer, scheduler_name, epochs):
     else:
         raise ValueError(f"Unsupported scheduler: {scheduler_name}")
 
-def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimizer_name, scheduler_name, weight_decay, warmup_epochs, patience=5):
+def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimizer_name, scheduler_name, weight_decay, warmup_epochs, label_smoothing, patience=5):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
 
     optimizer = get_optimizer(model, optimizer_name, lr, weight_decay)
     scheduler = get_scheduler(optimizer, scheduler_name, epochs)
-    criterion = nn.BCEWithLogitsLoss(label_smoothing=0.05)
-
+    criterion = nn.BCEWithLogitsLoss(label_smoothing=label_smoothing)
 
     save_dir = os.path.join("checkpoints", model_name)
     os.makedirs(save_dir, exist_ok=True)
@@ -89,7 +88,8 @@ def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimiz
 
     for epoch in range(epochs):
         print(f"\nEpoch {epoch + 1}/{epochs}")
-        
+
+        # Warmup logic
         if warmup_epochs > 0 and epoch < warmup_epochs:
             warmup_lr = lr * (epoch + 1) / warmup_epochs
             for param_group in optimizer.param_groups:
@@ -132,6 +132,7 @@ if __name__ == "__main__":
     parser.add_argument('--patience', type=int, default=5, help="Early stopping patience")
     parser.add_argument('--weight_decay', type=float, default=0.0, help="Weight decay for optimizer")
     parser.add_argument('--warmup_epochs', type=int, default=0, help="Number of warmup epochs before LR scheduler")
+    parser.add_argument('--label_smoothing', type=float, default=0.05, help="Label smoothing factor")
     args = parser.parse_args()
 
     train_loader, val_loader, test_loader = get_pcam_loaders(batch_size=args.batch_size)
@@ -157,6 +158,7 @@ if __name__ == "__main__":
         scheduler_name=args.scheduler,
         weight_decay=args.weight_decay,
         warmup_epochs=args.warmup_epochs,
+        label_smoothing=args.label_smoothing,
         patience=args.patience
     )
 
