@@ -135,17 +135,25 @@ if __name__ == "__main__":
     parser.add_argument('--label_smoothing', type=float, default=0.05, help="Label smoothing factor")
     args = parser.parse_args()
 
-    train_loader, val_loader, test_loader = get_pcam_loaders(batch_size=args.batch_size)
+    # Choose model and determine augmentation type
+    if args.model_name == "resnet50":
+        model = create_resnet50(pretrained=True)
+        model_type = "resnet"
+    elif args.model_name == "swin-tiny":
+        model = create_swin_tiny(pretrained=True)
+        model_type = "vit"
+    elif args.model_name == "dino-vits16":
+        model = create_dino_vit(pretrained=True)
+        model_type = "vit"
+        
+    train_loader, val_loader, test_loader = get_pcam_loaders(
+        batch_size=args.batch_size,
+        model_type=model_type
+    )
+
     print(f"Train set size: {len(train_loader.dataset)}")
     print(f"Validation set size: {len(val_loader.dataset)}")
     print(f"Test set size: {len(test_loader.dataset)}")
-
-    if args.model_name == "resnet50":
-        model = create_resnet50(pretrained=True)
-    elif args.model_name == "swin-tiny":
-        model = create_swin_tiny(pretrained=True)
-    elif args.model_name == "dino-vits16":
-        model = create_dino_vit(pretrained=True)
 
     best_val_acc, actual_epochs = train_model(
         model=model,
