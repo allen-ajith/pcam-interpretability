@@ -17,17 +17,21 @@ def set_seed(seed=42):
         torch.cuda.manual_seed_all(seed)
     print(f"Seed set to {seed} for reproducibility.")
 
-def train_one_epoch(model, loader, criterion, optimizer, device):
+def train_one_epoch(model, loader, criterion, optimizer, device, scaler, use_amp):
     model.train()
     running_loss, correct, total = 0.0, 0, 0
     pbar = tqdm(loader, desc="Training", leave=True)
     for images, labels in pbar:
         images, labels = images.to(device), labels.float().unsqueeze(1).to(device)
         optimizer.zero_grad()
-        outputs = model(images)
-        loss = criterion(outputs, labels)
-        loss.backward()
-        optimizer.step()
+
+        with torch.cuda.amp.autocast(enabled=use_amp):
+            outputs = model(images)
+            loss = criterion(outputs, labels)
+
+        scaler.scale(loss).backward()
+        scaler.step(optimizer)
+        scaler.update()
 
         running_loss += loss.item() * images.size(0)
         preds = (torch.sigmoid(outputs) > 0.5).float()
@@ -38,15 +42,16 @@ def train_one_epoch(model, loader, criterion, optimizer, device):
     epoch_acc = correct / total
     return epoch_loss, epoch_acc
 
-def validate(model, loader, criterion, device):
+def validate(model, loader, criterion, device, use_amp):
     model.eval()
     running_loss, correct, total = 0.0, 0, 0
     pbar = tqdm(loader, desc="Validation", leave=True)
     with torch.no_grad():
         for images, labels in pbar:
             images, labels = images.to(device), labels.float().unsqueeze(1).to(device)
-            outputs = model(images)
-            loss = criterion(outputs, labels)
+            with torch.cuda.amp.autocast(enabled=use_amp):
+                outputs = model(images)
+                loss = criterion(outputs, labels)
 
             running_loss += loss.item() * images.size(0)
             preds = (torch.sigmoid(outputs) > 0.5).float()
@@ -77,13 +82,13 @@ def get_scheduler(optimizer, scheduler_name, epochs):
     else:
         raise ValueError(f"Unsupported scheduler: {scheduler_name}")
 
-def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimizer_name, scheduler_name, weight_decay, warmup_epochs, patience=5):
+def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimizer_name, scheduler_name, weight_decay, warmup_epochs, patience=5, use_amp=False):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = model.to(device)
-
     optimizer = get_optimizer(model, optimizer_name, lr, weight_decay)
     scheduler = get_scheduler(optimizer, scheduler_name, epochs)
     criterion = nn.BCEWithLogitsLoss()
+    scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
     save_dir = os.path.join("checkpoints", model_name)
     os.makedirs(save_dir, exist_ok=True)
@@ -95,7 +100,6 @@ def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimiz
     for epoch in range(epochs):
         print(f"\nEpoch {epoch + 1}/{epochs}")
 
-        # Warmup logic
         if warmup_epochs > 0 and epoch < warmup_epochs:
             warmup_lr = lr * (epoch + 1) / warmup_epochs
             for param_group in optimizer.param_groups:
@@ -105,8 +109,8 @@ def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimiz
             current_lr = optimizer.param_groups[0]['lr']
             print(f"Current LR: {current_lr:.6f}")
 
-        train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device)
-        val_loss, val_acc = validate(model, val_loader, criterion, device)
+        train_loss, train_acc = train_one_epoch(model, train_loader, criterion, optimizer, device, scaler, use_amp)
+        val_loss, val_acc = validate(model, val_loader, criterion, device, use_amp)
 
         print(f"Train Loss: {train_loss:.4f}, Train Acc: {train_acc:.4f}")
         print(f"Val   Loss: {val_loss:.4f}, Val   Acc: {val_acc:.4f}")
@@ -139,14 +143,14 @@ if __name__ == "__main__":
     parser.add_argument('--lr', type=float, default=1e-4)
     parser.add_argument('--optimizer', type=str, default='adamw', choices=["adam", "adamw", "sgd"])
     parser.add_argument('--scheduler', type=str, default='cosine', choices=["cosine", "step", "none"])
-    parser.add_argument('--patience', type=int, default=5, help="Early stopping patience")
-    parser.add_argument('--weight_decay', type=float, default=0.0, help="Weight decay for optimizer")
-    parser.add_argument('--warmup_epochs', type=int, default=0, help="Number of warmup epochs before LR scheduler")
+    parser.add_argument('--patience', type=int, default=5)
+    parser.add_argument('--weight_decay', type=float, default=0.0)
+    parser.add_argument('--warmup_epochs', type=int, default=0)
+    parser.add_argument('--amp', action='store_true', help="Enable mixed precision training")
     args = parser.parse_args()
 
     set_seed(42)
 
-    # Model selection
     if args.model_name == "resnet50":
         model = create_resnet50(pretrained=True)
         model_type = "resnet"
@@ -156,11 +160,11 @@ if __name__ == "__main__":
     elif args.model_name == "dino-vits16":
         model = create_dino_vit(pretrained=True)
         model_type = "vit"
-        
+
     train_loader, val_loader, test_loader = get_pcam_loaders(
         batch_size=args.batch_size,
         model_type=model_type,
-        seed=42  
+        seed=42
     )
 
     print(f"Train set size: {len(train_loader.dataset)}")
@@ -178,7 +182,8 @@ if __name__ == "__main__":
         scheduler_name=args.scheduler,
         weight_decay=args.weight_decay,
         warmup_epochs=args.warmup_epochs,
-        patience=args.patience
+        patience=args.patience,
+        use_amp=args.amp
     )
 
     upload_model_to_hf(
