@@ -2,40 +2,45 @@ import torch
 import torch.nn as nn
 from transformers import AutoModelForImageClassification, AutoImageProcessor
 
+
 class DinoVitBinary(nn.Module):
     """
-    DINO ViT-S/16 model for binary classification.
-    Replaces the final classifier head with a single output neuron.
-    """
-    def __init__(self, pretrained=True):
-        super(DinoVitBinary, self).__init__()
-        model_name = "facebook/dino-vits16"  
-        
-        if pretrained:
-            self.backbone = AutoModelForImageClassification.from_pretrained(model_name)
-        else:
-            self.backbone = AutoModelForImageClassification.from_pretrained(model_name, ignore_mismatched_sizes=True)
+    DINO ViT-S/16 model for binary classification
 
-        # Replace classifier for binary output
+    Forward returns raw logits.
+    """
+
+    def __init__(self, pretrained: bool = True):
+        super().__init__()
+        model_name = "facebook/dino-vits16"
+        self.backbone = AutoModelForImageClassification.from_pretrained(
+            model_name,
+            num_labels=1,
+            ignore_mismatched_sizes=not pretrained,
+        )
+
         in_features = self.backbone.classifier.in_features
-        self.backbone.classifier = nn.Linear(in_features, 1)  # Binary output (logits)
+        self.backbone.classifier = nn.Linear(in_features, 1)
+
+        self.processor = AutoImageProcessor.from_pretrained(model_name)
 
     def forward(self, x):
         """
-        Args:
-            x (Tensor): Input tensor of shape (batch_size, 3, 224, 224).
         Returns:
-            Tensor: Raw logits (before sigmoid), shape (batch_size, 1).
+            Raw logits of shape (batch_size, 1).
         """
-        return self.backbone(x).logits
+        if isinstance(x, torch.Tensor):
+            outputs = self.backbone(pixel_values=x)
+        else:  # list/ndarray input → use processor to prepare tensors
+            inputs = self.processor(x, return_tensors="pt").to(
+                next(self.backbone.parameters()).device
+            )
+            outputs = self.backbone(**inputs)
+        return outputs.logits
 
-def create_dino_vit(pretrained=True):
+
+def create_dino_vit(pretrained: bool = True) -> nn.Module:
     """
-    Creates a DINO ViT-S/16 model for binary classification.
-
-    Args:
-        pretrained (bool): Whether to use self-supervised pretrained weights.
-    Returns:
-        nn.Module: DINO ViT binary classifier model.
+        A DINO ViT-S/16 model with a single-logit head.
     """
     return DinoVitBinary(pretrained=pretrained)
