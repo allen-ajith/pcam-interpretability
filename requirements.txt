@@ -8,3 +8,5 @@ pandas
 scikit-learn
 scipy
 datasets
+timm>=0.9.0
+
