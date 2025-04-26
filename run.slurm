@@ -24,7 +24,7 @@ conda activate pcamenv
 echo "Activated conda env: $(which python)"
 
 
-echo "========== Starting ResNet-50 Training (batch size 32, LR 7.5e-5) =========="
+echo "========== Starting ResNet-50 Training (batch size 32, LR 7.5e-5, patience 5) =========="
 python train.py \
   --model_name resnet50 \
   --epochs 20 \
@@ -34,10 +34,11 @@ python train.py \
   --scheduler cosine \
   --weight_decay 0.05 \
   --warmup_epochs 3 \
+  --patience 5 \
   --amp
 
 
-echo "========== Starting DINO ViT-S/16 Training (batch size 352, LR 6.875e-4) =========="
+echo "========== Starting DINO ViT-S/16 Training (batch size 352, LR 6.875e-4, patience 7) =========="
 python train.py \
   --model_name dino-vits16 \
   --epochs 30 \
@@ -47,6 +48,7 @@ python train.py \
   --scheduler cosine \
   --weight_decay 0.05 \
   --warmup_epochs 5 \
+  --patience 7 \
   --amp
 
 echo "############### Finished Run: $(date +%Y-%m-%d_%H:%M:%S) ###############"
