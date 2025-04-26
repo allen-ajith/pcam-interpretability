@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=pcam-train
+#SBATCH --job-name=pcam-train-sota
 #SBATCH --account=csci_ga_3033_109-2025sp
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
@@ -24,12 +24,12 @@ conda activate pcamenv
 echo "Activated conda env: $(which python)"
 
 
-echo "Starting ResNet-50 Training..."
+echo "========== Starting ResNet-50 Training (batch size 32, LR 7.5e-5) =========="
 python train.py \
   --model_name resnet50 \
   --epochs 20 \
   --batch_size 32 \
-  --lr 1.875e-5 \
+  --lr 7.5e-5 \
   --optimizer adamw \
   --scheduler cosine \
   --weight_decay 0.05 \
@@ -37,16 +37,16 @@ python train.py \
   --amp
 
 
-echo "Starting DINO ViT-S/16 Training ..."
+echo "========== Starting DINO ViT-S/16 Training (batch size 352, LR 6.875e-4) =========="
 python train.py \
   --model_name dino-vits16 \
   --epochs 30 \
-  --batch_size 64 \
-  --lr 7.5e-5 \
+  --batch_size 352 \
+  --lr 6.875e-4 \
   --optimizer adamw \
   --scheduler cosine \
   --weight_decay 0.05 \
-  --warmup_epochs 2 \
+  --warmup_epochs 5 \
   --amp
 
 echo "############### Finished Run: $(date +%Y-%m-%d_%H:%M:%S) ###############"
