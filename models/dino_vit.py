@@ -24,19 +24,25 @@ class DinoVitBinary(nn.Module):
 
         self.processor = AutoImageProcessor.from_pretrained(model_name)
 
-    def forward(self, x):
+    def forward(self, x, output_attentions=False):
         """
+        Args:
+            x (Tensor or image list): Input images.
+            output_attentions (bool): Whether to return attention maps.
         Returns:
-            Raw logits of shape (batch_size, 1).
+            Either raw logits, or (logits, attentions) if output_attentions=True.
         """
         if isinstance(x, torch.Tensor):
-            outputs = self.backbone(pixel_values=x)
-        else:  # list/ndarray input → use processor to prepare tensors
-            inputs = self.processor(x, return_tensors="pt").to(
-                next(self.backbone.parameters()).device
-            )
-            outputs = self.backbone(**inputs)
-        return outputs.logits
+            outputs = self.backbone(pixel_values=x, output_attentions=output_attentions)
+        else:  # For image lists or ndarrays
+            inputs = self.processor(x, return_tensors="pt").to(next(self.backbone.parameters()).device)
+            outputs = self.backbone(**inputs, output_attentions=output_attentions)
+
+        if output_attentions:
+            return outputs.logits, outputs.attentions
+        else:
+            return outputs.logits
+
 
 
 def create_dino_vit(pretrained: bool = True) -> nn.Module:
