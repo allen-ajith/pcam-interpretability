@@ -26,7 +26,7 @@ def test_batch_size(model_fn, model_name, model_type, start=16, max_batch=1024, 
             
             with torch.cuda.amp.autocast(): 
                 outputs = model(images)
-            print(f"Batch size {batch_size} successful!")
+            print(f"✅ Batch size {batch_size} successful!")
 
             del model
         except RuntimeError as e:
