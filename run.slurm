@@ -1,6 +1,6 @@
 #!/bin/bash
 
-#SBATCH --job-name=pcam-train-sota
+#SBATCH --job-name=pcam-train
 #SBATCH --account=csci_ga_3033_109-2025sp
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=1
