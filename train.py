@@ -19,7 +19,7 @@ def set_seed(seed=42):
         torch.cuda.manual_seed_all(seed)
     print(f"Seed set to {seed} for reproducibility.")
 
-def train_one_epoch(model, loader, criterion, optimizer, device, scaler, use_amp):
+def train_one_epoch(model, loader, criterion, optimizer, device, scaler, use_amp, model_name=None):
     model.train()
     running_loss, correct, total = 0.0, 0, 0
     pbar = tqdm(loader, desc="Training", leave=True)
@@ -32,6 +32,11 @@ def train_one_epoch(model, loader, criterion, optimizer, device, scaler, use_amp
             loss = criterion(outputs, labels)
 
         scaler.scale(loss).backward()
+
+        if model_name is not None and "vit" in model_name.lower():
+            scaler.unscale_(optimizer) 
+            torch.nn.utils.clip_grad_norm_(model.parameters(), max_norm=1.0)
+
         scaler.step(optimizer)
         scaler.update()
 
@@ -43,6 +48,7 @@ def train_one_epoch(model, loader, criterion, optimizer, device, scaler, use_amp
     epoch_loss = running_loss / total
     epoch_acc = correct / total
     return epoch_loss, epoch_acc
+
 
 def validate(model, loader, criterion, device, use_amp):
     model.eval()
