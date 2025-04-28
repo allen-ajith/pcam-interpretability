@@ -84,7 +84,7 @@ def get_scheduler(optimizer, scheduler_name, epochs):
     if scheduler_name == "cosine":
         return torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=epochs)
     elif scheduler_name == "step":
-        return torch.optim.lr_scheduler.StepLR(optimizer, step_size=10, gamma=0.1)
+        return torch.optim.lr_scheduler.StepLR(optimizer, step_size=5, gamma=0.1)
     elif scheduler_name == "none":
         return None
     else:
@@ -101,7 +101,6 @@ def train_model(model, train_loader, val_loader, model_name, epochs, lr, optimiz
     criterion = nn.BCEWithLogitsLoss()
     scaler = torch.cuda.amp.GradScaler(enabled=use_amp)
 
-    # === Checkpoint Directory Logic ===
     timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
     run_id = run_name if run_name else timestamp
     save_dir = os.path.join("checkpoints", f"{model_name}_{run_id}")

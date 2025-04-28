@@ -42,7 +42,7 @@ class ResNet50Binary(nn.Module):
         """
         return self.backbone(x)
 
-def create_resnet50(pretrained: bool = True, dropout: float = 0.2, freeze_early: bool = True):
+def create_resnet50(pretrained: bool = True, dropout: float = 0.4, freeze_early: bool = True):
     """
     Creates a ResNet-50d binary classifier.
 
