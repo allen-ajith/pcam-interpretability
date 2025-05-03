@@ -1,0 +1,148 @@
+import h5py
+import numpy as np
+from PIL import Image
+import torch
+import torch.nn as nn
+from torch.utils.data import Dataset, DataLoader
+import torchvision.transforms as T
+from huggingface_hub import hf_hub_download
+
+# ----------------------------
+# Load Datasets from Hugging Face
+# ----------------------------
+def load_data():
+    # Download original images
+    # orig_path = hf_hub_download(
+    #     repo_id="pcam-interpretability/train_data",
+    #     filename="training_split.h5",
+    #     repo_type="dataset"
+    # )
+    orig_path = "../pcam-interpretability/dataset/training_split.h5"
+
+    # Download Grad-CAM++ heatmaps
+    cam_path = hf_hub_download(
+        repo_id="pcam-interpretability/pcam_heatmaps",
+        filename="pcam_heatmaps_train_1.h5",
+        repo_type="dataset"
+    )
+
+    with h5py.File(orig_path, "r") as f:
+        orig_images = f["x"][:]
+
+    with h5py.File(cam_path, "r") as f:
+        cam_images = f["x"][:]
+
+    return orig_images, cam_images
+
+# ----------------------------
+# Convert Heatmaps to Binary Masks
+# ----------------------------
+def rgb_to_grayscale(images):
+    return np.dot(images[..., :3], [0.2989, 0.5870, 0.1140])
+
+def convert_to_binary_masks(cam_images, threshold=0.5):
+    grayscale = rgb_to_grayscale(cam_images) / 255.0
+    return (grayscale > threshold).astype(np.uint8)
+
+# ----------------------------
+# Custom Dataset
+# ----------------------------
+class PCamSegmentationDataset(Dataset):
+    def __init__(self, images, masks, transform=None):
+        self.images = images
+        self.masks = masks
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.images)
+
+    def __getitem__(self, idx):
+        img = Image.fromarray(self.images[idx])
+        mask = Image.fromarray((self.masks[idx] * 255).astype(np.uint8))
+
+        if self.transform:
+            img = self.transform(img)
+            mask = self.transform(mask)
+
+        return img, mask
+
+# ----------------------------
+# U-Net Model
+# ----------------------------
+class UNet(nn.Module):
+    def __init__(self):
+        super(UNet, self).__init__()
+        def CBR(in_channels, out_channels):
+            return nn.Sequential(
+                nn.Conv2d(in_channels, out_channels, 3, padding=1),
+                nn.ReLU(inplace=True),
+                nn.Conv2d(out_channels, out_channels, 3, padding=1),
+                nn.ReLU(inplace=True),
+            )
+        
+        self.enc1 = CBR(3, 64)
+        self.enc2 = CBR(64, 128)
+        self.pool = nn.MaxPool2d(2)
+        self.dec1 = CBR(128, 64)
+        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        self.final = nn.Conv2d(64, 1, 1)
+
+    def forward(self, x):
+        e1 = self.enc1(x)
+        e2 = self.enc2(self.pool(e1))
+        d1 = self.up(self.dec1(e2))
+        out = self.final(d1)
+        return torch.sigmoid(out)
+
+# ----------------------------
+# Training Loop
+# ----------------------------
+def train_unet(orig_images, cam_images, epochs=10, batch_size=32, lr=1e-4, save_path="unet.pth"):
+    binary_masks = convert_to_binary_masks(cam_images)
+
+    transform = T.Compose([T.ToTensor()])
+    dataset = PCamSegmentationDataset(orig_images, binary_masks, transform=transform)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    model = UNet().to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=lr)
+    loss_fn = nn.BCELoss()
+
+    for epoch in range(epochs):
+        model.train()
+        total_loss = 0
+        for imgs, masks in dataloader:
+            imgs = imgs.to(device)
+            masks = masks.to(device).float().unsqueeze(1) / 255.0
+
+            preds = model(imgs)
+            loss = loss_fn(preds, masks)
+
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+
+            total_loss += loss.item()
+
+        avg_loss = total_loss / len(dataloader)
+        print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+
+    torch.save(model.state_dict(), save_path)
+    print(f"Model saved to {save_path}")
+
+# ----------------------------
+# Main Entry Point
+# ----------------------------
+if __name__ == "__main__":
+    import argparse
+
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--epochs", type=int, default=10)
+    parser.add_argument("--batch_size", type=int, default=32)
+    parser.add_argument("--lr", type=float, default=1e-4)
+    parser.add_argument("--save_path", type=str, default="unet.pth")
+    args = parser.parse_args()
+
+    orig_images, cam_images = load_data()
+    train_unet(orig_images, cam_images, args.epochs, args.batch_size, args.lr, args.save_path)
