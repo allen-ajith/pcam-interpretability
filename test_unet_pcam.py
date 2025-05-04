@@ -12,10 +12,10 @@ from tqdm import tqdm
 # Load Datasets from Hugging Face
 # ----------------------------
 def load_data():
-    Download original images
+    # Download original images
     orig_path = hf_hub_download(
-        repo_id="allen-ajith/pcam-h5/pcam",
-        filename="camelyonpatch_level_2_split_train_x.h5",
+        repo_id="allen-ajith/pcam-h5",
+        filename="pcam/camelyonpatch_level_2_split_train_x.h5",
         repo_type="dataset"
     )
     # orig_path = "../pcam-interpretability/dataset/training_split.h5"
