@@ -12,7 +12,7 @@ from test_unet_pcam import UNet, convert_to_binary_masks  # Make sure to import 
 # ----------------------------
 # Set Paths
 # ----------------------------
-MODEL_PATH = "unet.pth"  # trained model
+MODEL_PATH = "checkpoints/unet.pth"  # trained model
 SAVE_DIR = "eval_outputs"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
@@ -23,8 +23,8 @@ print("Loading test data...")
 
 # Load original test images
 test_path = hf_hub_download(
-    repo_id="allen-ajith/pcam-h5/pcam",
-    filename="camelyonpatch_level_2_split_test_x.h5",
+    repo_id="allen-ajith/pcam-h5",
+    filename="pcam/camelyonpatch_level_2_split_test_x.h5",
     repo_type="dataset"
 )
 with h5py.File(test_path, "r") as f:
