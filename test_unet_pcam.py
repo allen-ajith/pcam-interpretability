@@ -7,6 +7,7 @@ from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
 from huggingface_hub import hf_hub_download
 from tqdm import tqdm
+import os
 
 # ----------------------------
 # Load Datasets from Hugging Face
@@ -136,7 +137,7 @@ def train_unet(orig_images, cam_images, epochs=10, batch_size=32, lr=1e-4, save_
 
         print(f"\nEpoch {epoch+1}/{epochs}")
         for imgs, masks in tqdm(dataloader, desc="Training", leave=False):
-            print('for train 2')
+            # print('for train 2')
             imgs = imgs.to(device)
             masks = masks.to(device).float() / 255.0
 
