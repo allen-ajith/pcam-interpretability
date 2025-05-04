@@ -9,4 +9,5 @@ scikit-learn
 scipy
 datasets
 timm>=0.9.0
+h5py
 

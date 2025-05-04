@@ -6,18 +6,19 @@ import torch.nn as nn
 from torch.utils.data import Dataset, DataLoader
 import torchvision.transforms as T
 from huggingface_hub import hf_hub_download
+from tqdm import tqdm
 
 # ----------------------------
 # Load Datasets from Hugging Face
 # ----------------------------
 def load_data():
-    # Download original images
-    # orig_path = hf_hub_download(
-    #     repo_id="pcam-interpretability/train_data",
-    #     filename="training_split.h5",
-    #     repo_type="dataset"
-    # )
-    orig_path = "../pcam-interpretability/dataset/training_split.h5"
+    Download original images
+    orig_path = hf_hub_download(
+        repo_id="allen-ajith/pcam-h5/pcam",
+        filename="camelyonpatch_level_2_split_train_x.h5",
+        repo_type="dataset"
+    )
+    # orig_path = "../pcam-interpretability/dataset/training_split.h5"
 
     # Download Grad-CAM++ heatmaps
     cam_path = hf_hub_download(
@@ -28,9 +29,11 @@ def load_data():
 
     with h5py.File(orig_path, "r") as f:
         orig_images = f["x"][:]
+        print('original')
 
     with h5py.File(cam_path, "r") as f:
         cam_images = f["x"][:]
+        print('gradcam')
 
     return orig_images, cam_images
 
@@ -38,9 +41,11 @@ def load_data():
 # Convert Heatmaps to Binary Masks
 # ----------------------------
 def rgb_to_grayscale(images):
+    print('rgb')
     return np.dot(images[..., :3], [0.2989, 0.5870, 0.1140])
 
 def convert_to_binary_masks(cam_images, threshold=0.5):
+    print('binary masks')
     grayscale = rgb_to_grayscale(cam_images) / 255.0
     return (grayscale > threshold).astype(np.uint8)
 
@@ -94,27 +99,46 @@ class UNet(nn.Module):
         out = self.final(d1)
         return torch.sigmoid(out)
 
+def compute_metrics(preds, targets, threshold=0.5, eps=1e-7):
+    preds = (preds > threshold).float()
+    targets = (targets > threshold).float()
+
+    intersection = (preds * targets).sum(dim=(1, 2, 3))
+    union = (preds + targets).sum(dim=(1, 2, 3)) - intersection
+    dice = (2 * intersection + eps) / (preds.sum(dim=(1, 2, 3)) + targets.sum(dim=(1, 2, 3)) + eps)
+    iou = (intersection + eps) / (union + eps)
+    return dice.mean().item(), iou.mean().item()
+
 # ----------------------------
 # Training Loop
 # ----------------------------
 def train_unet(orig_images, cam_images, epochs=10, batch_size=32, lr=1e-4, save_path="unet.pth"):
+    print('train 1')
     binary_masks = convert_to_binary_masks(cam_images)
 
     transform = T.Compose([T.ToTensor()])
     dataset = PCamSegmentationDataset(orig_images, binary_masks, transform=transform)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
-
+    print('train 2')
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     model = UNet().to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     loss_fn = nn.BCELoss()
-
+    os.makedirs("checkpoints", exist_ok=True)
+    print('train 3')
     for epoch in range(epochs):
         model.train()
         total_loss = 0
-        for imgs, masks in dataloader:
+        total_correct = 0
+        total_pixels = 0
+        total_dice = 0
+        total_iou = 0
+
+        print(f"\nEpoch {epoch+1}/{epochs}")
+        for imgs, masks in tqdm(dataloader, desc="Training", leave=False):
+            print('for train 2')
             imgs = imgs.to(device)
-            masks = masks.to(device).float().unsqueeze(1) / 255.0
+            masks = masks.to(device).float() / 255.0
 
             preds = model(imgs)
             loss = loss_fn(preds, masks)
@@ -125,9 +149,25 @@ def train_unet(orig_images, cam_images, epochs=10, batch_size=32, lr=1e-4, save_
 
             total_loss += loss.item()
 
-        avg_loss = total_loss / len(dataloader)
-        print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}")
+            # Accuracy
+            correct = ((preds > 0.5) == (masks > 0.5)).float().sum()
+            total_correct += correct.item()
+            total_pixels += masks.numel()
 
+            # Dice + IoU
+            dice, iou = compute_metrics(preds, masks)
+            total_dice += dice
+            total_iou += iou
+
+        avg_loss = total_loss / len(dataloader)
+        accuracy = total_correct / total_pixels
+        avg_dice = total_dice / len(dataloader)
+        avg_iou = total_iou / len(dataloader)
+
+        print(f"Epoch {epoch+1}/{epochs}, Loss: {avg_loss:.4f}, Accuracy: {accuracy:.4f}, Dice: {avg_dice:.4f}, IoU: {avg_iou:.4f}")
+        epoch_path = f"checkpoints/unet_epoch_{epoch+1}.pth"
+        torch.save(model.state_dict(), epoch_path)
+        print(f"Model checkpoint saved: {epoch_path}")
     torch.save(model.state_dict(), save_path)
     print(f"Model saved to {save_path}")
 
