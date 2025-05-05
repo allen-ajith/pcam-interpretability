@@ -116,7 +116,7 @@ def compute_metrics(preds, targets, threshold=0.5, eps=1e-7):
 # ----------------------------
 # Training Loop
 # ----------------------------
-def train_unet(orig_images, cam_images, epochs=7, batch_size=32, lr=1e-5, save_path="unet.pth"):
+def train_unet(orig_images, cam_images, epochs=15, batch_size=32, lr=1e-5, save_path="unet.pth"):
     grayscale_masks = convert_to_soft_masks(cam_images)
 
     transform = T.Compose([T.ToTensor()])
@@ -210,7 +210,7 @@ if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--epochs", type=int, default=7)
+    parser.add_argument("--epochs", type=int, default=15)
     parser.add_argument("--batch_size", type=int, default=32)
     parser.add_argument("--lr", type=float, default=1e-5)
     parser.add_argument("--save_path", type=str, default="unet.pth")
@@ -218,3 +218,10 @@ if __name__ == "__main__":
 
     orig_images, cam_images = load_data()
     train_unet(orig_images, cam_images, args.epochs, args.batch_size, args.lr, args.save_path)
+    visualize_predictions(
+    model_path="unet.pth",
+    images=orig_images,
+    masks=grayscale_masks,
+    num_samples=5  # Change as needed
+)
+
