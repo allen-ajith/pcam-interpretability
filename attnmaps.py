@@ -33,14 +33,20 @@ def load_data(split, max_samples=None):
     return x, y
 
 def upload_to_hf(local_path, repo_id, split):
-    upload_file(
-        path_or_fileobj=local_path,
-        path_in_repo=f"pcam_attn_{split}_with_logits.h5",
-        repo_id=repo_id,
-        repo_type="dataset",
-        commit_message=f"Upload {split} attention maps + logits + labels (streamed)"
-    )
-    print(f"[↑] Uploaded to: https://huggingface.co/datasets/{repo_id}/blob/main/pcam_attn_{split}_with_logits.h5")
+    try:
+        upload_file(
+            path_or_fileobj=local_path,
+            path_in_repo=f"pcam_attn_{split}_with_logits.h5",
+            repo_id=repo_id,
+            repo_type="dataset",
+            commit_message=f"Upload {split} attention maps + logits + labels (streamed)"
+        )
+        print(f"Upload successful: {local_path}")
+        os.remove(local_path)
+        print(f"Local file deleted: {local_path}")
+    except Exception as e:
+        print(f"Upload failed: {e}")
+        print(f"Keeping local file: {local_path}")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -56,7 +62,7 @@ def main():
     model = load_model_from_hf("dino-vits16", args.repo_id_model).to(DEVICE).eval()
     images, labels = load_data(args.split, args.max_samples)
     N = len(images)
-    print(f"[•] Loaded {N} {args.split} samples")
+    print(f"Loaded {N} samples from {args.split}")
 
     transform = T.Compose([
         T.ToPILImage(),
@@ -95,7 +101,7 @@ def main():
                 if idx % 100 == 0:
                     torch.cuda.empty_cache()
 
-    print(f"[✔] Saved to {out_file}")
+    print(f"Saved to {out_file}")
     upload_to_hf(out_file, args.repo_id_dataset, args.split)
 
     import gc
