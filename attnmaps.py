@@ -49,22 +49,10 @@ def upload_to_hf(local_path, repo_id, split, start, end):
         print(f"Upload failed: {e}")
         print(f"Keeping local file: {local_path}")
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--repo_id_model", type=str, required=True)
-    parser.add_argument("--repo_id_dataset", type=str, required=True)
-    parser.add_argument("--split", type=str, required=True, choices=["train", "val", "test"])
-    parser.add_argument("--start_idx", type=int, required=True)
-    parser.add_argument("--end_idx", type=int, required=True)
-    parser.add_argument("--batch_size", type=int, default=64)
-    parser.add_argument("--normalize_attn", action="store_true")
-    parser.add_argument("--smooth_sigma", type=float, default=0.0)
-    parser.add_argument("--output_dir", type=str, default=".")
-    args = parser.parse_args()
-
-    x_np, y_np = load_data_range(args.split, args.start_idx, args.end_idx)
+def process_chunk(model, args, start_idx, end_idx):
+    x_np, y_np = load_data_range(args.split, start_idx, end_idx)
     N = len(x_np)
-    print(f"Loaded {N} samples from {args.split} [{args.start_idx}:{args.end_idx}]")
+    print(f"Loaded {N} samples from {args.split} [{start_idx}:{end_idx}]")
 
     transform = T.Compose([
         T.ToPILImage(),
@@ -72,11 +60,9 @@ def main():
         T.ToTensor()
     ])
 
-    model = load_model_from_hf("dino-vits16", args.repo_id_model).to(DEVICE).eval()
-
     out_file = os.path.join(
         args.output_dir,
-        f"pcam_attn_{args.split}_part{args.start_idx}_{args.end_idx}.h5"
+        f"pcam_attn_{args.split}_part{start_idx}_{end_idx}.h5"
     )
 
     with h5py.File(out_file, "w") as f:
@@ -86,7 +72,7 @@ def main():
         dset_logits = f.create_dataset("logits", shape=(N, 2), dtype=np.float32)
 
         with torch.no_grad():
-            for idx in tqdm(range(N), desc="Generating attention maps"):
+            for idx in tqdm(range(N), desc=f"{start_idx}-{end_idx}"):
                 img_t = transform(x_np[idx]).unsqueeze(0).to(DEVICE)
                 label = int(y_np[idx])
 
@@ -109,7 +95,38 @@ def main():
                     torch.cuda.empty_cache()
 
     print(f"Saved chunk to: {out_file}")
-    upload_to_hf(out_file, args.repo_id_dataset, args.split, args.start_idx, args.end_idx)
+    upload_to_hf(out_file, args.repo_id_dataset, args.split, start_idx, end_idx)
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--repo_id_model", type=str, required=True)
+    parser.add_argument("--repo_id_dataset", type=str, required=True)
+    parser.add_argument("--split", type=str, required=True, choices=["train", "val", "test"])
+    parser.add_argument("--start_idx", type=int)
+    parser.add_argument("--end_idx", type=int)
+    parser.add_argument("--chunk_size", type=int)
+    parser.add_argument("--batch_size", type=int, default=64)
+    parser.add_argument("--normalize_attn", action="store_true")
+    parser.add_argument("--smooth_sigma", type=float, default=0.0)
+    parser.add_argument("--output_dir", type=str, default=".")
+    args = parser.parse_args()
+
+    if args.chunk_size:
+        x_path, _ = SPLIT_TO_FILENAME[args.split]
+        x_path = hf_hub_download("allen-ajith/pcam-h5", filename=x_path, repo_type="dataset")
+        with h5py.File(x_path, "r") as f:
+            total = len(f["x"])
+
+        model = load_model_from_hf("dino-vits16", args.repo_id_model).to(DEVICE).eval()
+        for start in range(0, total, args.chunk_size):
+            end = min(start + args.chunk_size, total)
+            print(f"\n=== Processing chunk {start}:{end} ===")
+            process_chunk(model, args, start, end)
+    else:
+        if args.start_idx is None or args.end_idx is None:
+            raise ValueError("Provide --start_idx and --end_idx when not using --chunk_size")
+        model = load_model_from_hf("dino-vits16", args.repo_id_model).to(DEVICE).eval()
+        process_chunk(model, args, args.start_idx, args.end_idx)
 
 if __name__ == "__main__":
     main()
