@@ -7,7 +7,7 @@ from tqdm import tqdm
 import torch.nn.functional as F
 from scipy.ndimage import gaussian_filter
 from huggingface_hub import hf_hub_download, upload_file
-from transformers import AutoModelForImageClassification
+from transformers import ViTModel
 import torchvision.transforms as T
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -61,7 +61,7 @@ def main():
     parser.add_argument("--output_dir", type=str, default=".")
     args = parser.parse_args()
 
-    model = AutoModelForImageClassification.from_pretrained(
+    model = ViTModel.from_pretrained(
         args.repo_id_model, output_attentions=True
     ).to(DEVICE).eval()
 
@@ -80,9 +80,10 @@ def main():
     with torch.no_grad():
         for img in tqdm(images, desc=f"Generating {args.split} dataset"):
             img_tensor = transform(img).unsqueeze(0).to(DEVICE)
-            outputs = model(pixel_values=img_tensor, output_attentions=True)
+            outputs = model(pixel_values=img_tensor)
+            attentions = outputs.attentions
 
-            attn = extract_cls_attn(outputs.attentions)
+            attn = extract_cls_attn(attentions)
             attn = F.interpolate(attn, size=(224, 224), mode="bilinear", align_corners=False).squeeze().cpu().numpy()
 
             if args.smooth_sigma > 0:
@@ -100,6 +101,11 @@ def main():
     out_file = os.path.join(args.output_dir, f"pcam_attn_{args.split}.h5")
     save_h5(x_array, y_array, out_file)
     upload_to_hf(out_file, args.repo_id_dataset, args.split)
+
+    # Optional memory cleanup
+    import gc
+    torch.cuda.empty_cache()
+    gc.collect()
 
 if __name__ == "__main__":
     main()
