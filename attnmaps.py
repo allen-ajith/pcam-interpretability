@@ -32,12 +32,6 @@ def load_images(split, max_samples=None):
     with h5py.File(h5_path, "r") as f:
         return f["x"][:max_samples]
 
-def save_h5(inputs, attns, out_path):
-    with h5py.File(out_path, "w") as f:
-        f.create_dataset("x", data=inputs, compression="gzip")  # (N, 3, 224, 224)
-        f.create_dataset("y", data=attns, compression="gzip")   # (N, 224, 224)
-    print(f"[✔] Saved dataset to {out_path} (x: {inputs.shape}, y: {attns.shape})")
-
 def upload_to_hf(local_path, repo_id, split):
     upload_file(
         path_or_fileobj=local_path,
@@ -46,7 +40,7 @@ def upload_to_hf(local_path, repo_id, split):
         repo_type="dataset",
         commit_message=f"Add {split} images + attention maps for U-Net"
     )
-    print(f"[↑] Uploaded {split} data to {repo_id}")
+    print(f"[↑] Uploaded {split} data to https://huggingface.co/datasets/{repo_id}/blob/main/pcam_attn_{split}.h5")
 
 def main():
     parser = argparse.ArgumentParser()
@@ -64,7 +58,8 @@ def main():
     model = load_model_from_hf("dino-vits16", args.repo_id_model).to(DEVICE).eval()
 
     images = load_images(args.split, args.max_samples)
-    print(f"[•] Loaded {len(images)} {args.split} images")
+    N = len(images)
+    print(f"[•] Loaded {N} {args.split} images")
 
     transform = T.Compose([
         T.ToPILImage(),
@@ -72,31 +67,33 @@ def main():
         T.ToTensor()
     ])
 
-    x_images = []
-    y_attn_maps = []
-
-    with torch.no_grad():
-        for img in tqdm(images, desc=f"Generating {args.split} dataset"):
-            img_tensor = transform(img).unsqueeze(0).to(DEVICE)
-            logits, attentions = model(img_tensor, output_attentions=True)
-
-            attn = extract_cls_attn(attentions)
-            attn = F.interpolate(attn, size=(224, 224), mode="bilinear", align_corners=False).squeeze().cpu().numpy()
-
-            if args.smooth_sigma > 0:
-                attn = gaussian_filter(attn, sigma=args.smooth_sigma)
-
-            if args.normalize_attn:
-                attn = (attn - attn.min()) / (attn.max() - attn.min() + 1e-8)
-
-            x_images.append(transform(img).numpy().astype(np.float32))   # (3, 224, 224)
-            y_attn_maps.append(attn.astype(np.float32))                 # (224, 224)
-
-    x_array = np.stack(x_images)
-    y_array = np.stack(y_attn_maps)
-
     out_file = os.path.join(args.output_dir, f"pcam_attn_{args.split}.h5")
-    save_h5(x_array, y_array, out_file)
+
+    with h5py.File(out_file, "w") as f:
+        dset_x = f.create_dataset("x", shape=(N, 3, 224, 224), dtype=np.float32)
+        dset_y = f.create_dataset("y", shape=(N, 224, 224), dtype=np.float32)
+
+        with torch.no_grad():
+            for idx, img in enumerate(tqdm(images, desc=f"Generating {args.split} attention maps")):
+                img_tensor = transform(img).unsqueeze(0).to(DEVICE)
+                logits, attentions = model(img_tensor, output_attentions=True)
+
+                attn = extract_cls_attn(attentions)
+                attn = F.interpolate(attn, size=(224, 224), mode="bilinear", align_corners=False).squeeze().cpu().numpy()
+
+                if args.smooth_sigma > 0:
+                    attn = gaussian_filter(attn, sigma=args.smooth_sigma)
+
+                if args.normalize_attn:
+                    attn = (attn - attn.min()) / (attn.max() - attn.min() + 1e-8)
+
+                dset_x[idx] = transform(img).numpy().astype(np.float32)
+                dset_y[idx] = attn.astype(np.float32)
+
+                if idx % 20 == 0:
+                    torch.cuda.empty_cache()
+
+    print(f"Saved attention dataset to {out_file}")
     upload_to_hf(out_file, args.repo_id_dataset, args.split)
 
     import gc
