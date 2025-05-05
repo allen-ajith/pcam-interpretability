@@ -19,29 +19,30 @@ SPLIT_TO_FILENAME = {
 }
 
 def extract_cls_attn(attentions):
-    last = attentions[-1]  # (B, heads, tokens, tokens)
-    cls_attn = last.mean(dim=1)[:, 0, 1:]  # (B, 196)
-    return cls_attn.reshape(-1, 1, 14, 14)  # (B, 1, 14, 14)
+    last = attentions[-1]
+    cls_attn = last.mean(dim=1)[:, 0, 1:]
+    return cls_attn.reshape(-1, 1, 14, 14)
 
-def load_data(split, max_samples=None):
+def load_data_range(split, start, end):
     x_path, y_path = SPLIT_TO_FILENAME[split]
     x_path = hf_hub_download("allen-ajith/pcam-h5", filename=x_path, repo_type="dataset")
     y_path = hf_hub_download("allen-ajith/pcam-h5", filename=y_path, repo_type="dataset")
     with h5py.File(x_path, "r") as fx, h5py.File(y_path, "r") as fy:
-        x = fx["x"][:max_samples]
-        y = fy["y"][:max_samples]
+        x = fx["x"][start:end]
+        y = fy["y"][start:end]
     return x, y
 
-def upload_to_hf(local_path, repo_id, split):
+def upload_to_hf(local_path, repo_id, split, start, end):
+    part_name = f"pcam_attn_{split}_part{start}_{end}.h5"
     try:
         upload_file(
             path_or_fileobj=local_path,
-            path_in_repo=f"pcam_attn_{split}_with_logits.h5",
+            path_in_repo=part_name,
             repo_id=repo_id,
             repo_type="dataset",
-            commit_message=f"Upload {split} attention maps + logits + labels (streamed)"
+            commit_message=f"Upload {split} part {start}-{end}"
         )
-        print(f"Upload successful: {local_path}")
+        print(f"Upload successful: {part_name}")
         os.remove(local_path)
         print(f"Local file deleted: {local_path}")
     except Exception as e:
@@ -53,16 +54,17 @@ def main():
     parser.add_argument("--repo_id_model", type=str, required=True)
     parser.add_argument("--repo_id_dataset", type=str, required=True)
     parser.add_argument("--split", type=str, required=True, choices=["train", "val", "test"])
-    parser.add_argument("--max_samples", type=int, default=None)
+    parser.add_argument("--start_idx", type=int, required=True)
+    parser.add_argument("--end_idx", type=int, required=True)
+    parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--normalize_attn", action="store_true")
     parser.add_argument("--smooth_sigma", type=float, default=0.0)
     parser.add_argument("--output_dir", type=str, default=".")
     args = parser.parse_args()
 
-    model = load_model_from_hf("dino-vits16", args.repo_id_model).to(DEVICE).eval()
-    images, labels = load_data(args.split, args.max_samples)
-    N = len(images)
-    print(f"Loaded {N} samples from {args.split}")
+    x_np, y_np = load_data_range(args.split, args.start_idx, args.end_idx)
+    N = len(x_np)
+    print(f"Loaded {N} samples from {args.split} [{args.start_idx}:{args.end_idx}]")
 
     transform = T.Compose([
         T.ToPILImage(),
@@ -70,7 +72,12 @@ def main():
         T.ToTensor()
     ])
 
-    out_file = os.path.join(args.output_dir, f"pcam_attn_{args.split}_with_logits.h5")
+    model = load_model_from_hf("dino-vits16", args.repo_id_model).to(DEVICE).eval()
+
+    out_file = os.path.join(
+        args.output_dir,
+        f"pcam_attn_{args.split}_part{args.start_idx}_{args.end_idx}.h5"
+    )
 
     with h5py.File(out_file, "w") as f:
         dset_x = f.create_dataset("x", shape=(N, 3, 224, 224), dtype=np.float32)
@@ -79,9 +86,9 @@ def main():
         dset_logits = f.create_dataset("logits", shape=(N, 2), dtype=np.float32)
 
         with torch.no_grad():
-            for idx in tqdm(range(N), desc=f"Generating {args.split} attention maps"):
-                img_t = transform(images[idx]).unsqueeze(0).to(DEVICE)
-                true = labels[idx]
+            for idx in tqdm(range(N), desc="Generating attention maps"):
+                img_t = transform(x_np[idx]).unsqueeze(0).to(DEVICE)
+                label = int(y_np[idx])
 
                 logits, attns = model(img_t, output_attentions=True)
                 attn = extract_cls_attn(attns)
@@ -93,20 +100,16 @@ def main():
                 if args.normalize_attn:
                     attn = (attn - attn.min()) / (attn.max() - attn.min() + 1e-8)
 
-                dset_x[idx] = transform(images[idx]).numpy().astype(np.float32)
+                dset_x[idx] = transform(x_np[idx]).numpy().astype(np.float32)
                 dset_y[idx] = attn.astype(np.float32)
-                dset_label[idx] = int(true)
+                dset_label[idx] = label
                 dset_logits[idx] = logits.squeeze().cpu().numpy()
 
                 if idx % 100 == 0:
                     torch.cuda.empty_cache()
 
-    print(f"Saved to {out_file}")
-    upload_to_hf(out_file, args.repo_id_dataset, args.split)
-
-    import gc
-    torch.cuda.empty_cache()
-    gc.collect()
+    print(f"Saved chunk to: {out_file}")
+    upload_to_hf(out_file, args.repo_id_dataset, args.split, args.start_idx, args.end_idx)
 
 if __name__ == "__main__":
     main()
