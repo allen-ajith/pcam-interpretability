@@ -12,7 +12,7 @@ from test_unet_pcam import UNet, convert_to_binary_masks  # Make sure to import 
 # ----------------------------
 # Set Paths
 # ----------------------------
-MODEL_PATH = "checkpoints/unet_epoch_1.pth"  # trained model
+MODEL_PATH = "checkpoints/unet.pth"  # trained model
 SAVE_DIR = "eval_outputs"
 os.makedirs(SAVE_DIR, exist_ok=True)
 
