@@ -7,8 +7,8 @@ from tqdm import tqdm
 import torch.nn.functional as F
 from scipy.ndimage import gaussian_filter
 from huggingface_hub import hf_hub_download, upload_file
-from utils.load_model_from_hf import load_model_from_hf
 import torchvision.transforms as T
+from utils.load_model_from_hf import load_model_from_hf
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -23,14 +23,22 @@ def extract_cls_attn(attentions):
     cls_attn = last.mean(dim=1)[:, 0, 1:]
     return cls_attn.reshape(-1, 1, 14, 14)
 
+def fix_vit_classifier_head(model, out_features=1, device=None):
+    if hasattr(model, "classifier"):
+        in_features = model.classifier.in_features
+        model.classifier = torch.nn.Linear(in_features, out_features)
+        if device:
+            model.classifier = model.classifier.to(device)
+        print(f"✅ Replaced ViT classifier with Linear({in_features}, {out_features})")
+    else:
+        raise AttributeError("Model does not have a `classifier` attribute.")
+
 def load_data_range(split, start, end):
-    x_path, y_path = SPLIT_TO_FILENAME[split]
+    x_path, _ = SPLIT_TO_FILENAME[split]
     x_path = hf_hub_download("allen-ajith/pcam-h5", filename=x_path, repo_type="dataset")
-    y_path = hf_hub_download("allen-ajith/pcam-h5", filename=y_path, repo_type="dataset")
-    with h5py.File(x_path, "r") as fx, h5py.File(y_path, "r") as fy:
+    with h5py.File(x_path, "r") as fx:
         x = fx["x"][start:end]
-        y = fy["y"][start:end]
-    return x, y
+    return x
 
 def upload_to_hf(local_path, repo_id, split, start, end):
     part_name = f"pcam_attn_{split}_part{start}_{end}.h5"
@@ -50,7 +58,7 @@ def upload_to_hf(local_path, repo_id, split, start, end):
         print(f"Keeping local file: {local_path}")
 
 def process_chunk(model, args, start_idx, end_idx):
-    x_np, y_np = load_data_range(args.split, start_idx, end_idx)
+    x_np = load_data_range(args.split, start_idx, end_idx)
     N = len(x_np)
     print(f"Loaded {N} samples from {args.split} [{start_idx}:{end_idx}]")
 
@@ -66,15 +74,12 @@ def process_chunk(model, args, start_idx, end_idx):
     )
 
     with h5py.File(out_file, "w") as f:
-        dset_x = f.create_dataset("x", shape=(N, 3, 224, 224), dtype=np.float32)
         dset_y = f.create_dataset("y", shape=(N, 224, 224), dtype=np.float32)
-        dset_label = f.create_dataset("label", shape=(N,), dtype=np.int64)
-        dset_logits = f.create_dataset("logits", shape=(N, 2), dtype=np.float32)
+        dset_logits = f.create_dataset("logits", shape=(N, 1), dtype=np.float32)
 
         with torch.no_grad():
             for idx in tqdm(range(N), desc=f"{start_idx}-{end_idx}"):
                 img_t = transform(x_np[idx]).unsqueeze(0).to(DEVICE)
-                label = int(y_np[idx])
 
                 logits, attns = model(img_t, output_attentions=True)
                 attn = extract_cls_attn(attns)
@@ -86,10 +91,8 @@ def process_chunk(model, args, start_idx, end_idx):
                 if args.normalize_attn:
                     attn = (attn - attn.min()) / (attn.max() - attn.min() + 1e-8)
 
-                dset_x[idx] = transform(x_np[idx]).numpy().astype(np.float32)
                 dset_y[idx] = attn.astype(np.float32)
-                dset_label[idx] = label
-                dset_logits[idx] = logits.squeeze().cpu().numpy()
+                dset_logits[idx] = logits.squeeze().cpu().numpy().reshape(1)
 
                 if idx % 100 == 0:
                     torch.cuda.empty_cache()
@@ -113,6 +116,7 @@ def main():
     args = parser.parse_args()
 
     model = load_model_from_hf("dino-vits16", args.repo_id_model).to(DEVICE).eval()
+    fix_vit_classifier_head(model, out_features=1, device=DEVICE)
 
     x_path, _ = SPLIT_TO_FILENAME[args.split]
     x_path = hf_hub_download("allen-ajith/pcam-h5", filename=x_path, repo_type="dataset")
