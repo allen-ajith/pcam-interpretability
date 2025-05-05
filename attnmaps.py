@@ -69,14 +69,14 @@ def process_chunk(model, args, start_idx, end_idx):
         dset_x = f.create_dataset("x", shape=(N, 3, 224, 224), dtype=np.float32)
         dset_y = f.create_dataset("y", shape=(N, 224, 224), dtype=np.float32)
         dset_label = f.create_dataset("label", shape=(N,), dtype=np.int64)
-        dset_logits = f.create_dataset("logits", shape=(N, 1), dtype=np.float32)
+        dset_logits = f.create_dataset("logits", shape=(N, 2), dtype=np.float32)
 
         with torch.no_grad():
             for idx in tqdm(range(N), desc=f"{start_idx}-{end_idx}"):
                 img_t = transform(x_np[idx]).unsqueeze(0).to(DEVICE)
                 label = int(y_np[idx])
 
-                logits, attns = model(img_t, output_attentions=True)  # logits shape: [1, 1]
+                logits, attns = model(img_t, output_attentions=True)
                 attn = extract_cls_attn(attns)
                 attn = F.interpolate(attn, size=(224, 224), mode="bilinear", align_corners=False).squeeze().cpu().numpy()
 
@@ -89,7 +89,7 @@ def process_chunk(model, args, start_idx, end_idx):
                 dset_x[idx] = transform(x_np[idx]).numpy().astype(np.float32)
                 dset_y[idx] = attn.astype(np.float32)
                 dset_label[idx] = label
-                dset_logits[idx] = logits.squeeze().cpu().numpy().reshape(1)  # Save as shape (1,)
+                dset_logits[idx] = logits.squeeze().cpu().numpy()
 
                 if idx % 100 == 0:
                     torch.cuda.empty_cache()
@@ -105,6 +105,7 @@ def main():
     parser.add_argument("--start_idx", type=int)
     parser.add_argument("--end_idx", type=int)
     parser.add_argument("--chunk_size", type=int)
+    parser.add_argument("--all", action="store_true")
     parser.add_argument("--batch_size", type=int, default=64)
     parser.add_argument("--normalize_attn", action="store_true")
     parser.add_argument("--smooth_sigma", type=float, default=0.0)
@@ -113,19 +114,23 @@ def main():
 
     model = load_model_from_hf("dino-vits16", args.repo_id_model).to(DEVICE).eval()
 
-    if args.chunk_size:
-        x_path, _ = SPLIT_TO_FILENAME[args.split]
-        x_path = hf_hub_download("allen-ajith/pcam-h5", filename=x_path, repo_type="dataset")
-        with h5py.File(x_path, "r") as f:
-            total = len(f["x"])
+    x_path, _ = SPLIT_TO_FILENAME[args.split]
+    x_path = hf_hub_download("allen-ajith/pcam-h5", filename=x_path, repo_type="dataset")
+    with h5py.File(x_path, "r") as f:
+        total = len(f["x"])
 
+    if args.all:
+        print(f"\n=== Processing entire split: {args.split} (0:{total}) ===")
+        process_chunk(model, args, 0, total)
+    elif args.chunk_size:
         for start in range(0, total, args.chunk_size):
             end = min(start + args.chunk_size, total)
             print(f"\n=== Processing chunk {start}:{end} ===")
             process_chunk(model, args, start, end)
     else:
         if args.start_idx is None or args.end_idx is None:
-            raise ValueError("Provide --start_idx and --end_idx when not using --chunk_size")
+            raise ValueError("Provide --start_idx and --end_idx when not using --chunk_size or --all")
+        print(f"\n=== Processing range {args.start_idx}:{args.end_idx} ===")
         process_chunk(model, args, args.start_idx, args.end_idx)
 
 if __name__ == "__main__":
