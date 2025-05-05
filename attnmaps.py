@@ -1,68 +1,89 @@
 import argparse
+import os
 import h5py
 import torch
 import numpy as np
 from tqdm import tqdm
 import torch.nn.functional as F
 from scipy.ndimage import gaussian_filter
-from utils.pcam_dataloader import get_pcam_loaders
-from utils.load_model_from_hf import load_model_from_hf
+from huggingface_hub import hf_hub_download, upload_file
+from transformers import AutoModelForImageClassification
+import torchvision.transforms as T
 
-def attention_rollout(attentions):
-    result = torch.eye(attentions[0].size(-1)).to(attentions[0].device)
-    for attn in attentions:
-        attn_heads = attn.mean(dim=1)
-        attn_heads = attn_heads / attn_heads.sum(dim=-1, keepdim=True)
-        result = torch.bmm(attn_heads, result)
-    return result[:, 0, 1:]
+DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+SPLIT_TO_FILENAME = {
+    "train": "pcam/camelyonpatch_level_2_split_train_x.h5",
+    "val":   "pcam/camelyonpatch_level_2_split_valid_x.h5",
+    "test":  "pcam/camelyonpatch_level_2_split_test_x.h5"
+}
+
+def extract_cls_attn(attentions):
+    last = attentions[-1]  # (B, heads, tokens, tokens)
+    cls_attn = last.mean(dim=1)[:, 0, 1:]  # (B, 196)
+    return cls_attn.reshape(-1, 1, 14, 14)  # (B, 1, 14, 14)
+
+def load_images(split, max_samples=None):
+    h5_path = hf_hub_download(
+        repo_id="allen-ajith/pcam-h5",
+        filename=SPLIT_TO_FILENAME[split],
+        repo_type="dataset"
+    )
+    with h5py.File(h5_path, "r") as f:
+        return f["x"][:max_samples]
+
+def save_h5(inputs, attns, out_path):
+    with h5py.File(out_path, "w") as f:
+        f.create_dataset("x", data=inputs, compression="gzip")  # (N, 3, 224, 224)
+        f.create_dataset("y", data=attns, compression="gzip")   # (N, 224, 224)
+    print(f"[✔] Saved dataset to {out_path} (x: {inputs.shape}, y: {attns.shape})")
+
+def upload_to_hf(local_path, repo_id, split):
+    upload_file(
+        path_or_fileobj=local_path,
+        path_in_repo=f"pcam_attn_{split}.h5",
+        repo_id=repo_id,
+        repo_type="dataset",
+        commit_message=f"Add {split} images + attention maps for U-Net"
+    )
+    print(f"[↑] Uploaded {split} data to {repo_id}")
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--repo_id", type=str, required=True)
-    parser.add_argument("--split", type=str, default="train", choices=["train", "val", "test"])
-    parser.add_argument("--batch_size", type=int, default=16)
-    parser.add_argument("--max_batches", type=int, default=999)
-    parser.add_argument("--output_file", type=str, default="/kaggle/working/pcam_attn_for_unet.h5")
-    parser.add_argument("--rollout_type", type=str, default="last", choices=["last", "full"])
-    parser.add_argument("--upsample_size", type=int, default=224)
+    parser.add_argument("--repo_id_model", type=str, required=True,
+                        help="HF model repo (e.g. pcam-interpretability/dino-vits16-val08842-vit-v2)")
+    parser.add_argument("--repo_id_dataset", type=str, required=True,
+                        help="HF dataset repo for uploading output")
+    parser.add_argument("--split", type=str, required=True, choices=["train", "val", "test"])
+    parser.add_argument("--max_samples", type=int, default=None)
     parser.add_argument("--normalize_attn", action="store_true")
     parser.add_argument("--smooth_sigma", type=float, default=0.0)
-    parser.add_argument("--amp", action="store_true")
+    parser.add_argument("--output_dir", type=str, default=".")
     args = parser.parse_args()
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = load_model_from_hf("dino-vits16", args.repo_id).to(device).eval()
-    loaders = get_pcam_loaders(batch_size=args.batch_size, model_type="vit")
-    loader = {"train": loaders[0], "val": loaders[1], "test": loaders[2]}[args.split]
+    model = AutoModelForImageClassification.from_pretrained(
+        args.repo_id_model, output_attentions=True
+    ).to(DEVICE).eval()
 
-    all_images = []
-    all_attn_maps = []
+    images = load_images(args.split, args.max_samples)
+    print(f"[•] Loaded {len(images)} {args.split} images")
 
-    torch.set_grad_enabled(False)
-    for b_idx, (images, _) in enumerate(tqdm(loader, desc=f"{args.split} attention rollout")):
-        if b_idx >= args.max_batches:
-            break
-        images = images.to(device)
+    transform = T.Compose([
+        T.ToPILImage(),
+        T.Resize((224, 224)),
+        T.ToTensor()
+    ])
 
-        with torch.cuda.amp.autocast(enabled=args.amp):
-            _, attn_list = model(images, output_attentions=True)
+    x_images = []
+    y_attn_maps = []
 
-        if args.rollout_type == "full":
-            attn_roll = attention_rollout(attn_list)
-        else:
-            attn_last = attn_list[-1].mean(dim=1)
-            attn_last = attn_last / attn_last.sum(dim=-1, keepdim=True)
-            attn_roll = attn_last[:, 0, 1:]
+    with torch.no_grad():
+        for img in tqdm(images, desc=f"Generating {args.split} dataset"):
+            img_tensor = transform(img).unsqueeze(0).to(DEVICE)
+            outputs = model(pixel_values=img_tensor, output_attentions=True)
 
-        for i in range(images.size(0)):
-            img = images[i].detach().cpu()
-            attn = attn_roll[i].detach().cpu().view(14, 14)
-            attn = F.interpolate(
-                attn.unsqueeze(0).unsqueeze(0),
-                size=(args.upsample_size, args.upsample_size),
-                mode="bilinear",
-                align_corners=False
-            ).squeeze().numpy()
+            attn = extract_cls_attn(outputs.attentions)
+            attn = F.interpolate(attn, size=(224, 224), mode="bilinear", align_corners=False).squeeze().cpu().numpy()
 
             if args.smooth_sigma > 0:
                 attn = gaussian_filter(attn, sigma=args.smooth_sigma)
@@ -70,14 +91,15 @@ def main():
             if args.normalize_attn:
                 attn = (attn - attn.min()) / (attn.max() - attn.min() + 1e-8)
 
-            img_np = img.permute(1, 2, 0).numpy()
-            all_images.append(img_np.astype(np.float32))
-            all_attn_maps.append(attn[..., np.newaxis].astype(np.float32))
+            x_images.append(transform(img).numpy().astype(np.float32))   # shape (3, 224, 224)
+            y_attn_maps.append(attn.astype(np.float32))                 # shape (224, 224)
 
-    with h5py.File(args.output_file, "w") as f:
-        f.create_dataset("x", data=np.stack(all_images))
-        f.create_dataset("y", data=np.stack(all_attn_maps))
-    print(f"Saved: {args.output_file}")
+    x_array = np.stack(x_images)       # (N, 3, 224, 224)
+    y_array = np.stack(y_attn_maps)    # (N, 224, 224)
+
+    out_file = os.path.join(args.output_dir, f"pcam_attn_{args.split}.h5")
+    save_h5(x_array, y_array, out_file)
+    upload_to_hf(out_file, args.repo_id_dataset, args.split)
 
 if __name__ == "__main__":
     main()
