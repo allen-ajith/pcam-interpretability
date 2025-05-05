@@ -7,7 +7,7 @@ from tqdm import tqdm
 import torch.nn.functional as F
 from scipy.ndimage import gaussian_filter
 from huggingface_hub import hf_hub_download, upload_file
-from transformers import ViTModel
+from utils.load_model_from_hf import load_model_from_hf
 import torchvision.transforms as T
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -51,9 +51,9 @@ def upload_to_hf(local_path, repo_id, split):
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--repo_id_model", type=str, required=True,
-                        help="HF model repo (e.g. pcam-interpretability/dino-vits16-val08842-vit-v2)")
+                        help="HF model repo with your .pth checkpoint")
     parser.add_argument("--repo_id_dataset", type=str, required=True,
-                        help="HF dataset repo for uploading output")
+                        help="HF dataset repo to upload the .h5 files")
     parser.add_argument("--split", type=str, required=True, choices=["train", "val", "test"])
     parser.add_argument("--max_samples", type=int, default=None)
     parser.add_argument("--normalize_attn", action="store_true")
@@ -61,9 +61,7 @@ def main():
     parser.add_argument("--output_dir", type=str, default=".")
     args = parser.parse_args()
 
-    model = ViTModel.from_pretrained(
-        args.repo_id_model, output_attentions=True
-    ).to(DEVICE).eval()
+    model = load_model_from_hf("dino-vits16", args.repo_id_model).to(DEVICE).eval()
 
     images = load_images(args.split, args.max_samples)
     print(f"[•] Loaded {len(images)} {args.split} images")
@@ -80,8 +78,7 @@ def main():
     with torch.no_grad():
         for img in tqdm(images, desc=f"Generating {args.split} dataset"):
             img_tensor = transform(img).unsqueeze(0).to(DEVICE)
-            outputs = model(pixel_values=img_tensor)
-            attentions = outputs.attentions
+            logits, attentions = model(img_tensor, output_attentions=True)
 
             attn = extract_cls_attn(attentions)
             attn = F.interpolate(attn, size=(224, 224), mode="bilinear", align_corners=False).squeeze().cpu().numpy()
@@ -92,17 +89,16 @@ def main():
             if args.normalize_attn:
                 attn = (attn - attn.min()) / (attn.max() - attn.min() + 1e-8)
 
-            x_images.append(transform(img).numpy().astype(np.float32))   # shape (3, 224, 224)
-            y_attn_maps.append(attn.astype(np.float32))                 # shape (224, 224)
+            x_images.append(transform(img).numpy().astype(np.float32))   # (3, 224, 224)
+            y_attn_maps.append(attn.astype(np.float32))                 # (224, 224)
 
-    x_array = np.stack(x_images)       # (N, 3, 224, 224)
-    y_array = np.stack(y_attn_maps)    # (N, 224, 224)
+    x_array = np.stack(x_images)
+    y_array = np.stack(y_attn_maps)
 
     out_file = os.path.join(args.output_dir, f"pcam_attn_{args.split}.h5")
     save_h5(x_array, y_array, out_file)
     upload_to_hf(out_file, args.repo_id_dataset, args.split)
 
-    # Optional memory cleanup
     import gc
     torch.cuda.empty_cache()
     gc.collect()
