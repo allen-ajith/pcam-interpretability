@@ -29,9 +29,13 @@ def fix_vit_classifier_head(model, out_features=1, device=None):
         model.classifier = torch.nn.Linear(in_features, out_features)
         if device:
             model.classifier = model.classifier.to(device)
-        print(f"✅ Replaced ViT classifier with Linear({in_features}, {out_features})")
+    elif hasattr(model, "backbone") and hasattr(model.backbone, "classifier"):
+        in_features = model.backbone.classifier.in_features
+        model.backbone.classifier = torch.nn.Linear(in_features, out_features)
+        if device:
+            model.backbone.classifier = model.backbone.classifier.to(device)
     else:
-        raise AttributeError("Model does not have a `classifier` attribute.")
+        raise AttributeError("Model does not have a classifier or backbone.classifier attribute.")
 
 def load_data_range(split, start, end):
     x_path, _ = SPLIT_TO_FILENAME[split]
@@ -50,9 +54,7 @@ def upload_to_hf(local_path, repo_id, split, start, end):
             repo_type="dataset",
             commit_message=f"Upload {split} part {start}-{end}"
         )
-        print(f"Upload successful: {part_name}")
         os.remove(local_path)
-        print(f"Local file deleted: {local_path}")
     except Exception as e:
         print(f"Upload failed: {e}")
         print(f"Keeping local file: {local_path}")
@@ -60,7 +62,6 @@ def upload_to_hf(local_path, repo_id, split, start, end):
 def process_chunk(model, args, start_idx, end_idx):
     x_np = load_data_range(args.split, start_idx, end_idx)
     N = len(x_np)
-    print(f"Loaded {N} samples from {args.split} [{start_idx}:{end_idx}]")
 
     transform = T.Compose([
         T.ToPILImage(),
@@ -97,7 +98,6 @@ def process_chunk(model, args, start_idx, end_idx):
                 if idx % 100 == 0:
                     torch.cuda.empty_cache()
 
-    print(f"Saved chunk to: {out_file}")
     upload_to_hf(out_file, args.repo_id_dataset, args.split, start_idx, end_idx)
 
 def main():
@@ -124,17 +124,14 @@ def main():
         total = len(f["x"])
 
     if args.all:
-        print(f"\n=== Processing entire split: {args.split} (0:{total}) ===")
         process_chunk(model, args, 0, total)
     elif args.chunk_size:
         for start in range(0, total, args.chunk_size):
             end = min(start + args.chunk_size, total)
-            print(f"\n=== Processing chunk {start}:{end} ===")
             process_chunk(model, args, start, end)
     else:
         if args.start_idx is None or args.end_idx is None:
             raise ValueError("Provide --start_idx and --end_idx when not using --chunk_size or --all")
-        print(f"\n=== Processing range {args.start_idx}:{args.end_idx} ===")
         process_chunk(model, args, args.start_idx, args.end_idx)
 
 if __name__ == "__main__":
