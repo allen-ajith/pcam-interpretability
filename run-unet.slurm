@@ -25,7 +25,7 @@ echo "############### Run Log: $(date +%Y-%m-%d_%H:%M:%S) ###############"
 singularity exec --bind /scratch --nv --overlay /scratch/spp9400/overlay-25GB-500K.ext3:rw /scratch/spp9400/cuda11.8.86-cudnn8.7-devel-ubuntu22.04.2.sif /bin/bash
 source /ext3/miniconda3/etc/profile.d/conda.sh
 conda activate unet
-python train_unet_pcam.py \
+python unet/unet_train.py \
   --epochs 5 \
   --batch_size 64 \
   --save_path unet_batch1.pth
