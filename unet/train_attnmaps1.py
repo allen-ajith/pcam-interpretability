@@ -411,7 +411,7 @@ def train():
     patience = 3
     patience_counter = 0
     
-    for epoch in range(5):  # More epochs for better learning
+    for epoch in range(10):  # More epochs for better learning
         # Training phase
         model.train()
         total_loss = 0

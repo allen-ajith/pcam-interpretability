@@ -96,7 +96,7 @@ def visualize_prediction(original_img, prediction, save_path=None):
     # Display prediction heatmap
     plt.subplot(1, 3, 2)
     plt.imshow(prediction, cmap='viridis')
-    plt.title("GradCAM Prediction")
+    plt.title("U-net Prediction")
     plt.axis('off')
     
     # Display overlay

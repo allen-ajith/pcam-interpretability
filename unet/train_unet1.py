@@ -147,7 +147,7 @@ def train():
 
     os.makedirs("checkpoint", exist_ok=True)
     
-    for epoch in range(5):
+    for epoch in range(10):
         model.train()
         total_loss, total_dice, total_iou, total_acc = 0, 0, 0, 0
         for imgs, masks in tqdm(train_loader):
