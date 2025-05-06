@@ -23,7 +23,6 @@ def load_orig_and_gradcam():
         filename="pcam_heatmaps_train_1.h5",
         repo_type="dataset"
     )
-
     with h5py.File(orig_path, "r") as f:
         orig_images = f["x"][:]
     with h5py.File(gradcam_path, "r") as f:
@@ -31,35 +30,14 @@ def load_orig_and_gradcam():
     return orig_images, gradcam_maps
 
 # ----------------------------
-# Load and Concatenate Attention Maps from Multiple Parts
-# ----------------------------
-def load_attention_maps():
-    attn_maps, logits_list = [], []
-    file_list = [
-        "pcam_attn_train_part0_87381.h5",
-        "pcam_attn_train_part174762_262144.h5",
-        "pcam_attn_train_part87381_174762.h5"
-    ]
-    for file in file_list:
-        path = hf_hub_download(
-            repo_id="pcam-interpretability/dino_vit_attnmaps",
-            filename=file,
-            repo_type="dataset"
-        )
-        with h5py.File(path, "r") as f:
-            attn_maps.append(f["y"][:])
-            logits_list.append(f["logits"][:].reshape(-1))
-    return np.concatenate(attn_maps), np.concatenate(logits_list)
-
-# ----------------------------
 # Dataset
 # ----------------------------
-class PCamCombinedDataset(Dataset):
-    def __init__(self, images, masks, transform=None):
+class PCamDataset(Dataset):
+    def __init__(self, images, masks, img_transform=None, mask_transform=None):
         self.images = images
         self.masks = masks
-        self.transform = transform
-        self.mask_resize = T.Resize((224, 224))
+        self.img_transform = img_transform
+        self.mask_transform = mask_transform
 
     def __len__(self):
         return len(self.images)
@@ -67,12 +45,16 @@ class PCamCombinedDataset(Dataset):
     def __getitem__(self, idx):
         img = Image.fromarray(self.images[idx])
         mask = Image.fromarray((self.masks[idx] * 255).astype(np.uint8))
-        mask = self.mask_resize(mask)
 
-        if self.transform:
-            img = self.transform(img)
-            mask = self.transform(mask)
+        if self.img_transform:
+            img = self.img_transform(img)
+        if self.mask_transform:
+            mask = self.mask_transform(mask)
 
+        # Ensure mask has only 1 channel
+        if mask.shape[0] == 3:  # If mask has 3 channels, take just the first one
+            mask = mask[0].unsqueeze(0)
+            
         return img, mask
 
 # ----------------------------
@@ -94,72 +76,57 @@ class UNet(nn.Module):
         self.pool = nn.MaxPool2d(2)
         self.dec1 = CBR(128, 64)
         self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        self.final = nn.Conv2d(64, 1, 1)
+        self.final = nn.Conv2d(64, 1, 1)  # Output is single channel
 
     def forward(self, x):
         e1 = self.enc1(x)
         e2 = self.enc2(self.pool(e1))
         d1 = self.up(self.dec1(e2))
         out = self.final(d1)
-        return out  # No sigmoid
+        return torch.sigmoid(out)
 
 # ----------------------------
 # Metrics
 # ----------------------------
 def compute_metrics(preds, targets, threshold=0.5, eps=1e-7):
-    preds = (torch.sigmoid(preds) > threshold).float()
+    preds = (preds > threshold).float()
     targets = (targets > threshold).float()
 
     intersection = (preds * targets).sum(dim=(1, 2, 3))
     union = (preds + targets).sum(dim=(1, 2, 3)) - intersection
     dice = (2 * intersection + eps) / (preds.sum(dim=(1, 2, 3)) + targets.sum(dim=(1, 2, 3)) + eps)
     iou = (intersection + eps) / (union + eps)
-    return dice.mean().item(), iou.mean().item()
-
-# ----------------------------
-# Visualization
-# ----------------------------
-def visualize_predictions(model, dataloader, device):
-    import matplotlib.pyplot as plt
-    model.eval()
-    imgs, masks = next(iter(dataloader))
-    imgs, masks = imgs.to(device), masks.to(device)
-    with torch.no_grad():
-        preds = torch.sigmoid(model(imgs))
-
-    for i in range(min(5, len(imgs))):
-        img = imgs[i].permute(1, 2, 0).cpu().numpy()
-        gt = masks[i][0].cpu().numpy()
-        pred = preds[i][0].cpu().numpy()
-        plt.figure(figsize=(10,3))
-        plt.subplot(1,3,1); plt.imshow(img); plt.title("Image"); plt.axis('off')
-        plt.subplot(1,3,2); plt.imshow(gt, cmap='gray'); plt.title("GT Mask")
-        plt.subplot(1,3,3); plt.imshow(pred, cmap='gray'); plt.title("Predicted")
-        plt.show()
+    acc = (preds == targets).float().mean(dim=(1, 2, 3))
+    return dice.mean().item(), iou.mean().item(), acc.mean().item()
 
 # ----------------------------
 # Training
 # ----------------------------
 def train():
+    print("Loading datasets...")
     orig_images, gradcam_maps = load_orig_and_gradcam()
-    attn_maps, logits = load_attention_maps()
 
-    # Filter confidently classified samples (you can adjust threshold)
-    correct_idx = np.where((logits > 0.9) | (logits < 0.1))[0]
-    correct_idx = correct_idx[:10000]
-    orig_images = orig_images[correct_idx]
-    gradcam_maps = gradcam_maps[correct_idx]
+    # orig_images = orig_images[:10000]  # optional subset
+    # gradcam_maps = gradcam_maps[:10000]
 
-    grad_gray = np.dot(gradcam_maps[...,:3], [0.2989, 0.5870, 0.1140]) / 255.0
-    grad_gray = np.array([np.array(Image.fromarray(x).resize((224, 224))) for x in grad_gray])
+    print(f"Original image shape: {orig_images.shape}")
+    print(f"Gradcam maps shape: {gradcam_maps.shape}")
 
-    transform = T.Compose([
+    # Resize & Normalize Images
+    img_transform = T.Compose([
+        T.Resize((224, 224)),
         T.ToTensor(),
         T.Normalize(mean=[0.5]*3, std=[0.5]*3)
     ])
 
-    dataset = PCamCombinedDataset(orig_images, grad_gray, transform=transform)
+    # Resize Masks and ensure single channel
+    mask_transform = T.Compose([
+        T.Resize((224, 224)),
+        T.Grayscale(num_output_channels=1),  # Convert to single channel
+        T.ToTensor()
+    ])
 
+    dataset = PCamDataset(orig_images, gradcam_maps, img_transform=img_transform, mask_transform=mask_transform)
     val_size = int(0.1 * len(dataset))
     train_size = len(dataset) - val_size
     train_ds, val_ds = random_split(dataset, [train_size, val_size])
@@ -167,29 +134,60 @@ def train():
     train_loader = DataLoader(train_ds, batch_size=32, shuffle=True, num_workers=0)
     val_loader = DataLoader(val_ds, batch_size=32)
 
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    model = UNet().to(device)
-    optimizer = torch.optim.Adam(model.parameters(), lr=1e-4)
-    loss_fn = nn.BCEWithLogitsLoss()
+    # Check shapes of first batch
+    imgs, masks = next(iter(train_loader))
+    print(f"Batch image shape: {imgs.shape}")
+    print(f"Batch mask shape: {masks.shape}")
 
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    print(f"Using device: {device}")
+    model = UNet().to(device)
+    optimizer = torch.optim.Adam(model.parameters(), lr=1e-5)
+    loss_fn = nn.BCELoss()
+
+    os.makedirs("checkpoints", exist_ok=True)
+    
     for epoch in range(5):
         model.train()
-        total_loss, total_dice, total_iou = 0, 0, 0
+        total_loss, total_dice, total_iou, total_acc = 0, 0, 0, 0
         for imgs, masks in tqdm(train_loader):
-            imgs, masks = imgs.to(device), masks.to(device).float() / 255.0
+            imgs, masks = imgs.to(device), masks.to(device).float()
             preds = model(imgs)
+            
+            # Double-check shapes before loss calculation
+            if preds.shape != masks.shape:
+                print(f"Warning: Shape mismatch - pred: {preds.shape}, mask: {masks.shape}")
+                # Ensure masks match prediction shape if needed
+                masks = masks[:, :1, :, :]  # Take just first channel if multi-channel
+                
             loss = loss_fn(preds, masks)
-            optimizer.zero_grad(); loss.backward(); optimizer.step()
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
             total_loss += loss.item()
-            dice, iou = compute_metrics(preds, masks)
-            total_dice += dice; total_iou += iou
+            dice, iou, acc = compute_metrics(preds, masks)
+            total_dice += dice
+            total_iou += iou
+            total_acc += acc
 
-        print(f"Epoch {epoch+1}: Loss={total_loss:.4f}, Dice={total_dice/len(train_loader):.4f}, IoU={total_iou/len(train_loader):.4f}")
-        torch.save(model.state_dict(), f"checkpoints/unet_epoch_{epoch+1}.pth")
-
-    visualize_predictions(model, val_loader, device)
+        print(f"Epoch {epoch+1}: Loss={total_loss/len(train_loader):.4f}, Dice={total_dice/len(train_loader):.4f}, IoU={total_iou/len(train_loader):.4f}, Acc={total_acc/len(train_loader):.4f}")
+        
+        # Validation step
+        model.eval()
+        val_loss, val_dice, val_iou, val_acc = 0, 0, 0, 0
+        with torch.no_grad():
+            for imgs, masks in val_loader:
+                imgs, masks = imgs.to(device), masks.to(device).float()
+                preds = model(imgs)
+                val_loss += loss_fn(preds, masks).item()
+                dice, iou, acc = compute_metrics(preds, masks)
+                val_dice += dice
+                val_iou += iou
+                val_acc += acc
+        
+        print(f"Validation: Loss={val_loss/len(val_loader):.4f}, Dice={val_dice/len(val_loader):.4f}, IoU={val_iou/len(val_loader):.4f}, Acc={val_acc/len(val_loader):.4f}")
+        torch.save(model.state_dict(), f"checkpoints/unet_gradcam_epoch_{epoch+1}.pth")
 
 if __name__ == "__main__":
-    os.makedirs("checkpoints", exist_ok=True)
     train()
-
