@@ -334,7 +334,7 @@ def train():
     
     labels = (logits > 0.5).astype(int)
     correct_idx = np.where((labels == 1) | (labels == 0))[0]
-    correct_idx = correct_idx[:20000]  # subset for testing
+    correct_idx = correct_idx[:10000]  # subset for testing
     
     orig_images = orig_images[correct_idx]
     attn_maps = attn_maps[correct_idx]
@@ -411,7 +411,7 @@ def train():
     patience = 3
     patience_counter = 0
     
-    for epoch in range(10):  # More epochs for better learning
+    for epoch in range(14):  # More epochs for better learning
         # Training phase
         model.train()
         total_loss = 0

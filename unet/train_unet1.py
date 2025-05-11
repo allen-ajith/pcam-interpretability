@@ -71,19 +71,72 @@ class UNet(nn.Module):
                 nn.ReLU(inplace=True),
             )
 
+        # self.enc1 = CBR(3, 64)
+        # self.enc2 = CBR(64, 128)
+        # self.pool = nn.MaxPool2d(2)
+        # self.dec1 = CBR(128, 64)
+        # self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
+        # self.final = nn.Conv2d(64, 1, 1)  # Output is single channel
         self.enc1 = CBR(3, 64)
         self.enc2 = CBR(64, 128)
+        self.enc3 = CBR(128, 256)
+        self.enc4 = CBR(256, 512)
         self.pool = nn.MaxPool2d(2)
-        self.dec1 = CBR(128, 64)
-        self.up = nn.Upsample(scale_factor=2, mode='bilinear', align_corners=True)
-        self.final = nn.Conv2d(64, 1, 1)  # Output is single channel
+        
+        # Bottleneck
+        self.bottleneck = CBR(512, 1024)
+        
+        # Decoder
+        self.up1 = nn.ConvTranspose2d(1024, 512, kernel_size=2, stride=2)
+        self.dec1 = CBR(1024, 512)
+        
+        self.up2 = nn.ConvTranspose2d(512, 256, kernel_size=2, stride=2)
+        self.dec2 = CBR(512, 256)
+        
+        self.up3 = nn.ConvTranspose2d(256, 128, kernel_size=2, stride=2)
+        self.dec3 = CBR(256, 128)
+        
+        self.up4 = nn.ConvTranspose2d(128, 64, kernel_size=2, stride=2)
+        self.dec4 = CBR(128, 64)
+        
+        # Output layer
+        self.out = nn.Conv2d(64, 1, kernel_size=1)
 
     def forward(self, x):
-        e1 = self.enc1(x)
-        e2 = self.enc2(self.pool(e1))
-        d1 = self.up(self.dec1(e2))
-        out = self.final(d1)
+        # e1 = self.enc1(x)
+        # e2 = self.enc2(self.pool(e1))
+        # d1 = self.up(self.dec1(e2))
+        # out = self.final(d1)
+        # return torch.sigmoid(out)
+        # Encoding
+        enc1 = self.enc1(x)
+        enc2 = self.enc2(self.pool(enc1))
+        enc3 = self.enc3(self.pool(enc2))
+        enc4 = self.enc4(self.pool(enc3))
+        
+        # Bottleneck
+        bottleneck = self.bottleneck(self.pool(enc4))
+        
+        # Decoding with skip connections
+        dec1 = self.up1(bottleneck)
+        dec1 = torch.cat([dec1, enc4], dim=1)
+        dec1 = self.dec1(dec1)
+        
+        dec2 = self.up2(dec1)
+        dec2 = torch.cat([dec2, enc3], dim=1)
+        dec2 = self.dec2(dec2)
+        
+        dec3 = self.up3(dec2)
+        dec3 = torch.cat([dec3, enc2], dim=1)
+        dec3 = self.dec3(dec3)
+        
+        dec4 = self.up4(dec3)
+        dec4 = torch.cat([dec4, enc1], dim=1)
+        dec4 = self.dec4(dec4)
+        
+        out = self.out(dec4)
         return torch.sigmoid(out)
+
 
 # ----------------------------
 # Metrics
@@ -106,8 +159,8 @@ def train():
     print("Loading datasets...")
     orig_images, gradcam_maps = load_orig_and_gradcam()
 
-    orig_images = orig_images[:20000]  # optional subset
-    gradcam_maps = gradcam_maps[:20000]
+    orig_images = orig_images[:10000]  # optional subset
+    gradcam_maps = gradcam_maps[:10000]
 
     print(f"Original image shape: {orig_images.shape}")
     print(f"Gradcam maps shape: {gradcam_maps.shape}")
@@ -147,7 +200,7 @@ def train():
 
     os.makedirs("checkpoint", exist_ok=True)
     
-    for epoch in range(10):
+    for epoch in range(14):
         model.train()
         total_loss, total_dice, total_iou, total_acc = 0, 0, 0, 0
         for imgs, masks in tqdm(train_loader):
